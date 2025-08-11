@@ -1,0 +1,58 @@
+import { Button } from "@/components/ui/button";
+import { Download, Save, GraduationCap } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+export default function Header() {
+  const { toast } = useToast();
+
+  const handleBackup = () => {
+    toast({
+      title: "백업 다운로드",
+      description: "데이터 백업을 다운로드합니다.",
+    });
+  };
+
+  const handleSave = () => {
+    toast({
+      title: "데이터 저장",
+      description: "현재 데이터가 저장되었습니다.",
+    });
+  };
+
+  return (
+    <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          <div className="flex items-center space-x-4">
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+              <GraduationCap className="text-white h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-slate-900" data-testid="app-title">
+                교육관리 시스템
+              </h1>
+              <p className="text-sm text-slate-500">Education Management System v2.0</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-4">
+            <Button 
+              variant="outline" 
+              onClick={handleBackup}
+              data-testid="button-backup"
+            >
+              <Download className="mr-2 h-4 w-4" />
+              백업 다운로드
+            </Button>
+            <Button 
+              onClick={handleSave}
+              data-testid="button-save"
+            >
+              <Save className="mr-2 h-4 w-4" />
+              데이터 저장
+            </Button>
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
