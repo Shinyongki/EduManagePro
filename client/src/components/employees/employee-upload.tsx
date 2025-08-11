@@ -106,8 +106,10 @@ export default function EmployeeUpload({ type }: EmployeeUploadProps) {
           region: row[1] || '',
           allocatedSocialWorkers: parseInt(row[2]) || 0,
           allocatedLifeSupport: parseInt(row[3]) || 0,
-          actualSocialWorkers: parseInt(row[4]) || 0,
-          actualLifeSupport: parseInt(row[5]) || 0,
+          budgetSocialWorkers: parseInt(row[4]) || 0,
+          budgetLifeSupport: parseInt(row[5]) || 0,
+          actualSocialWorkers: parseInt(row[6]) || 0,
+          actualLifeSupport: parseInt(row[7]) || 0,
         }));
         setInstitutionData(parsedData);
       }

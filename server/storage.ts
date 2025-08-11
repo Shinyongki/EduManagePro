@@ -1,37 +1,60 @@
-import { type User, type InsertUser } from "@shared/schema";
-import { randomUUID } from "crypto";
+import type { EducationData, EmployeeData, InstitutionData, AnalysisResult } from "@shared/schema";
 
-// modify the interface with any CRUD methods
-// you might need
-
+// Simple in-memory storage implementation for education management system
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Education data operations
+  getEducationData(): Promise<EducationData[]>;
+  saveEducationData(data: EducationData[]): Promise<void>;
+  
+  // Employee data operations
+  getEmployeeData(): Promise<EmployeeData[]>;
+  saveEmployeeData(data: EmployeeData[]): Promise<void>;
+  
+  // Institution data operations
+  getInstitutionData(): Promise<InstitutionData[]>;
+  saveInstitutionData(data: InstitutionData[]): Promise<void>;
+  
+  // Analysis results operations
+  getAnalysisResults(): Promise<AnalysisResult[]>;
+  saveAnalysisResults(results: AnalysisResult[]): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private educationData: EducationData[] = [];
+  private employeeData: EmployeeData[] = [];
+  private institutionData: InstitutionData[] = [];
+  private analysisResults: AnalysisResult[] = [];
 
-  constructor() {
-    this.users = new Map();
+  async getEducationData(): Promise<EducationData[]> {
+    return this.educationData;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async saveEducationData(data: EducationData[]): Promise<void> {
+    this.educationData = data;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async getEmployeeData(): Promise<EmployeeData[]> {
+    return this.employeeData;
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async saveEmployeeData(data: EmployeeData[]): Promise<void> {
+    this.employeeData = data;
+  }
+
+  async getInstitutionData(): Promise<InstitutionData[]> {
+    return this.institutionData;
+  }
+
+  async saveInstitutionData(data: InstitutionData[]): Promise<void> {
+    this.institutionData = data;
+  }
+
+  async getAnalysisResults(): Promise<AnalysisResult[]> {
+    return this.analysisResults;
+  }
+
+  async saveAnalysisResults(results: AnalysisResult[]): Promise<void> {
+    this.analysisResults = results;
   }
 }
 
