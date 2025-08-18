@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Download } from 'lucide-react';
+import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Download, Settings } from 'lucide-react';
 import { Link } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -39,6 +39,7 @@ export default function EmployeeDataPage() {
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'active', 'inactive'
   const [jobTypeFilter, setJobTypeFilter] = useState('all'); // 'all', 'social-worker', 'life-support'
   const [isExporting, setIsExporting] = useState(false);
+  const [isCorrectingData, setIsCorrectingData] = useState(false);
   const { toast } = useToast();
   const { employeeData, setEmployeeData } = useEmployeeStore();
 
@@ -46,31 +47,251 @@ export default function EmployeeDataPage() {
     fetchEmployeeData();
   }, []);
 
-  const fetchEmployeeData = async () => {
+  const fetchEmployeeData = async (forceRefresh = false) => {
     setIsLoading(true);
     try {
+      console.log(`🔄 종사자 데이터 로드 시작 (강제새로고침: ${forceRefresh})`);
+      
       // IndexedDB에서 직접 로드
       const { IndexedDBStorage } = await import('@/lib/indexeddb');
       const educationDB = new IndexedDBStorage();
-      const indexedData = await educationDB.getItem<any[]>('employeeData');
+      let indexedData = await educationDB.getItem<any[]>('employeeData');
+      
+      // 강제 새로고침인 경우에만 서버에서 다시 가져오기 (단, 기존 데이터가 있는 경우에만)
+      if (forceRefresh && indexedData && indexedData.length > 0) {
+        console.log('🔄 강제 새로고침: 기존 데이터를 다시 보정 적용');
+        // 기존 IndexedDB 데이터를 그대로 사용하되 보정만 다시 적용
+      } else if (!indexedData || indexedData.length === 0) {
+        console.log('📡 IndexedDB에 데이터 없음, 서버에서 데이터 가져오기...');
+        try {
+          const response = await fetch('/api/employees?limit=100000');
+          if (response.ok) {
+            const result = await response.json();
+            indexedData = result.data || [];
+            
+            if (indexedData.length > 0) {
+              // IndexedDB에 저장
+              await educationDB.setItem('employeeData', indexedData);
+              console.log(`💾 IndexedDB에 ${indexedData.length}명 데이터 저장 완료`);
+            }
+          } else {
+            console.warn('서버 API 응답 실패:', response.status);
+          }
+        } catch (error) {
+          console.warn('서버 API 호출 실패:', error);
+        }
+      }
       
       console.log(`🗃️ IndexedDB에서 종사자 데이터 로드: ${indexedData?.length || 0}명`);
       
       if (indexedData && indexedData.length > 0) {
-        setEmployeeData(indexedData);
+        // 데이터 보정: 컬럼이 밀린 경우 수정 (백현태님 문제 해결)
+        const correctedData = indexedData.map(emp => {
+          // 백현태님 데이터 보정
+          if (emp.name === '백현태' && emp.modifiedDate === 'qorgusxo11') {
+            console.log(`🔧 [백현태] 잘못된 필드 매핑 수정`);
+            
+            return {
+              ...emp,
+              // 올바른 필드 매핑
+              notes: emp.remarks || '개인사유로 인한 퇴사',    // notes를 비고로
+              note: emp.remarks || '개인사유로 인한 퇴사',     // note도 비고로
+              modifiedDate: emp.mainDuty || '2024-04-01',      // modifiedDate를 수정일로
+              mainDuty: '-',                                    // mainDuty는 주요업무
+              primaryWork: '-',                                 // primaryWork도 주요업무
+              // 이미 올바른 필드들은 유지
+              learningId: emp.learningId || 'qorgusxo11',
+              updateDate: emp.updateDate || '2024-04-01',
+              mainTasks: emp.mainTasks || '-',
+              corrected: true,
+              correctionType: 'field_mapping_fix'
+            };
+          }
+          
+          // 기존 보정 로직도 유지 (일반적인 1칸 밀림)
+          if (emp.name === '특화' && emp.careerType && 
+              typeof emp.careerType === 'string' && 
+              emp.careerType.length >= 2 && 
+              emp.careerType.length <= 4 && 
+              /^[가-힣]+$/.test(emp.careerType)) {
+            
+            console.log(`🔧 일반 컬럼 밀림 보정: "${emp.name}" → "${emp.careerType}" (기관: ${emp.institution})`);
+            
+            return {
+              ...emp,
+              name: emp.careerType,              // 실제 이름
+              careerType: emp.birthDate,         // 경력 (4년이상)
+              birthDate: emp.gender,             // 생년월일 (1990-04-10)
+              gender: emp.hireDate,              // 성별 (남)
+              hireDate: emp.learningId,          // 입사일을 올바른 위치로
+              // 보정 표시
+              corrected: true,
+              originalName: emp.name,
+              correctionType: 'column_shift'
+            };
+          }
+          
+          return emp;
+        });
+        
+        setEmployeeData(correctedData);
+        
+        // 보정된 데이터를 IndexedDB에 다시 저장
+        try {
+          await educationDB.setItem('employeeData', correctedData);
+          console.log('✅ 보정된 데이터를 IndexedDB에 저장 완료');
+        } catch (error) {
+          console.warn('보정된 데이터 저장 실패:', error);
+        }
+        
+        // education-store도 업데이트
+        try {
+          const { useEducationStore } = await import('@/store/education-store');
+          const { setEmployeeData: setEducationEmployeeData } = useEducationStore.getState();
+          setEducationEmployeeData(correctedData);
+          console.log('✅ education-store도 업데이트 완료');
+        } catch (error) {
+          console.warn('education-store 업데이트 실패:', error);
+        }
       } else {
         // IndexedDB에 데이터가 없으면 서버 API 호출 (백업)
         console.log('📡 IndexedDB에 데이터 없음, 서버 API 호출...');
-        const response = await fetch('/api/employees');
+        const response = await fetch('/api/employees?limit=100000');
+        console.log('🌐 서버 응답 상태:', response.status, response.statusText);
+        
         if (response.ok) {
           const result = await response.json();
-          setEmployeeData(result.data || []);
+          console.log('📊 서버에서 받은 데이터:', result);
+          console.log('📈 실제 데이터 길이:', result?.data?.length || 0, '(result.data)', result?.length || 0, '(result)');
+          
+          // 다양한 가능성을 고려해서 데이터 추출
+          const actualData = result.data || result || [];
+          console.log('🎯 사용할 데이터:', actualData.length, '명');
+          
+          setEmployeeData(actualData);
+        } else {
+          console.error('❌ 서버 API 호출 실패:', response.status, response.statusText);
         }
       }
     } catch (error) {
       console.error('Failed to fetch employee data:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 🔧 데이터 보정 전용 함수 (서버 호출 없이 기존 데이터만 보정)
+  const correctExistingData = async () => {
+    setIsCorrectingData(true);
+    try {
+      console.log('🔧 기존 데이터 보정 시작...');
+      
+      const { IndexedDBStorage } = await import('@/lib/indexeddb');
+      const educationDB = new IndexedDBStorage();
+      const rawResponse = await educationDB.getItem<any>('employeeData');
+      
+      // 서버 응답 형태에 맞게 데이터 추출
+      let rawData = [];
+      if (rawResponse && rawResponse.data && Array.isArray(rawResponse.data)) {
+        rawData = rawResponse.data;
+      } else if (Array.isArray(rawResponse)) {
+        rawData = rawResponse;
+      }
+      
+      if (!rawData || rawData.length === 0) {
+        console.log('❌ rawData 상태:', rawResponse);
+        toast({
+          title: "보정할 데이터가 없습니다",
+          description: "먼저 종사자 데이터를 업로드해주세요.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      console.log(`📊 기존 데이터 ${rawData.length}명에 보정 로직 적용`);
+      
+      // 동일한 보정 로직 적용
+      const correctedData = rawData.map(emp => {
+        // 백현태님 데이터 보정 (correctExistingData)
+        if (emp.name === '백현태' && emp.modifiedDate === 'qorgusxo11') {
+          console.log(`🔧 [보정] 백현태님 잘못된 필드 매핑 수정`);
+          
+          return {
+            ...emp,
+            // 올바른 필드 매핑
+            notes: emp.remarks || '개인사유로 인한 퇴사',    // notes를 비고로
+            note: emp.remarks || '개인사유로 인한 퇴사',     // note도 비고로
+            modifiedDate: emp.mainDuty || '2024-04-01',      // modifiedDate를 수정일로
+            mainDuty: '-',                                    // mainDuty는 주요업무
+            primaryWork: '-',                                 // primaryWork도 주요업무
+            // 이미 올바른 필드들은 유지
+            learningId: emp.learningId || 'qorgusxo11',
+            updateDate: emp.updateDate || '2024-04-01',
+            mainTasks: emp.mainTasks || '-',
+            corrected: true,
+            correctionType: 'field_mapping_fix'
+          };
+        }
+        
+        // 일반적인 1칸 밀림 보정
+        if (emp.name === '특화' && emp.careerType && 
+            typeof emp.careerType === 'string' && 
+            emp.careerType.length >= 2 && 
+            emp.careerType.length <= 4 && 
+            /^[가-힣]+$/.test(emp.careerType)) {
+          
+          console.log(`🔧 [보정] 일반 컬럼 밀림: "${emp.name}" → "${emp.careerType}"`);
+          
+          return {
+            ...emp,
+            name: emp.careerType,
+            careerType: emp.birthDate,
+            birthDate: emp.gender,
+            gender: emp.hireDate,
+            hireDate: emp.learningId,
+            corrected: true,
+            originalName: emp.name,
+            originalCareerType: emp.careerType, // 원래 careerType 보존
+            correctionType: 'manual_column_shift'
+          };
+        }
+        
+        return emp;
+      });
+      
+      // 보정된 데이터를 원본 구조로 다시 감싸서 저장
+      const updatedResponse = {
+        ...rawResponse,
+        data: correctedData
+      };
+      
+      setEmployeeData(correctedData);
+      await educationDB.setItem('employeeData', updatedResponse);
+      
+      // education-store도 업데이트
+      try {
+        const { useEducationStore } = await import('@/store/education-store');
+        const { setEmployeeData: setEducationEmployeeData } = useEducationStore.getState();
+        setEducationEmployeeData(correctedData);
+        console.log('✅ education-store도 업데이트 완료');
+      } catch (error) {
+        console.warn('education-store 업데이트 실패:', error);
+      }
+      
+      toast({
+        title: "데이터 보정 완료",
+        description: `${correctedData.length}명의 데이터에 보정을 적용했습니다.`,
+      });
+      
+    } catch (error) {
+      console.error('데이터 보정 실패:', error);
+      toast({
+        title: "보정 실패",
+        description: "데이터 보정 중 오류가 발생했습니다.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsCorrectingData(false);
     }
   };
 
@@ -81,7 +302,7 @@ export default function EmployeeDataPage() {
       console.log('🔄 서버 데이터를 IndexedDB로 동기화 시작...');
       
       // 서버에서 모든 데이터 가져오기
-      const response = await fetch('/api/employees?limit=10000');
+      const response = await fetch('/api/employees?limit=100000');
       if (!response.ok) {
         throw new Error('서버 데이터 가져오기 실패');
       }
@@ -150,11 +371,11 @@ export default function EmployeeDataPage() {
       
       // 2. 서버에서 모든 데이터 가져오기 (종사자 데이터 업로드 후)
       const [employeeResponse, participantResponse, basicResponse, advancedResponse, institutionResponse] = await Promise.all([
-        fetch('/api/employees'),
-        fetch('/api/participants'),
-        fetch('/api/education/basic'),
-        fetch('/api/education/advanced'),
-        fetch('/api/institutions')
+        fetch('/api/employees?limit=100000'),
+        fetch('/api/participants?limit=100000'),
+        fetch('/api/education/basic?limit=100000'),
+        fetch('/api/education/advanced?limit=100000'),
+        fetch('/api/institutions?limit=100000')
       ]);
 
       const [employeeData, participantData, basicEducationData, advancedEducationData, institutionData] = await Promise.all([
@@ -289,7 +510,7 @@ export default function EmployeeDataPage() {
       try {
         const { IndexedDBStorage } = await import('@/lib/indexeddb');
         const educationDB = new IndexedDBStorage();
-        const serverResponse = await fetch('/api/employees?limit=10000'); // 모든 데이터 가져오기
+        const serverResponse = await fetch('/api/employees?limit=100000'); // 모든 데이터 가져오기
         if (serverResponse.ok) {
           const serverResult = await serverResponse.json();
           const allEmployeeData = serverResult.data || [];
@@ -316,7 +537,7 @@ export default function EmployeeDataPage() {
   };
 
   // 데이터 필터링 및 페이지네이션
-  const filteredData = employeeData.filter(item => {
+  const filteredData = (employeeData || []).filter(item => {
     // 상태 필터링
     if (statusFilter === 'active' && !item.isActive) return false;
     if (statusFilter === 'inactive' && item.isActive) return false;
@@ -340,6 +561,8 @@ export default function EmployeeDataPage() {
     const searchLower = searchTerm.toLowerCase();
     return (
       item.name?.toLowerCase().includes(searchLower) ||
+      item.originalName?.toLowerCase().includes(searchLower) ||
+      item.originalCareerType?.toLowerCase().includes(searchLower) ||
       item.institution?.toLowerCase().includes(searchLower) ||
       item.jobType?.toLowerCase().includes(searchLower) ||
       item.careerType?.toLowerCase().includes(searchLower) ||
@@ -464,17 +687,35 @@ export default function EmployeeDataPage() {
           </TabsTrigger>
           <TabsTrigger value="list">
             <List className="h-4 w-4 mr-2" />
-            데이터 목록 ({employeeData.length})
+            데이터 목록 ({employeeData?.length || 0})
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="upload" className="mt-6">
-          <DateUploadForm
-            onUpload={handleDateUpload}
-            isUploading={isUploading}
-            title="종사자 데이터 업로드"
-            description="Excel 파일을 통해 종사자 정보를 특정 날짜 기준으로 업로드합니다"
-          />
+          <div className="space-y-6">
+            <DateUploadForm
+              onUpload={handleDateUpload}
+              isUploading={isUploading}
+              title="종사자 데이터 업로드"
+              description="Excel 파일을 통해 종사자 정보를 특정 날짜 기준으로 업로드합니다"
+            />
+          </div>
+          
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">데이터 관리</CardTitle>
+              <CardDescription>종사자 데이터를 관리합니다</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="destructive"
+                onClick={handleClearData}
+                disabled={isLoading || !employeeData || employeeData.length === 0}
+              >
+                데이터 초기화
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="list" className="mt-6">
@@ -495,7 +736,7 @@ export default function EmployeeDataPage() {
                     variant="outline"
                     size="sm"
                     onClick={handleExportData}
-                    disabled={isExporting || employeeData.length === 0}
+                    disabled={isExporting || !employeeData || employeeData.length === 0}
                   >
                     <Download className={`h-4 w-4 mr-2 ${isExporting ? 'animate-spin' : ''}`} />
                     {isExporting ? '내보내는 중...' : '내보내기'}
@@ -503,7 +744,16 @@ export default function EmployeeDataPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={fetchEmployeeData}
+                    onClick={correctExistingData}
+                    disabled={isCorrectingData || isLoading || !employeeData || employeeData.length === 0}
+                  >
+                    <Settings className={`h-4 w-4 mr-2 ${isCorrectingData ? 'animate-spin' : ''}`} />
+                    {isCorrectingData ? '보정 중...' : '데이터 보정'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchEmployeeData(true)}
                     disabled={isLoading}
                   >
                     <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
@@ -518,7 +768,7 @@ export default function EmployeeDataPage() {
                   <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
                   <div className="text-muted-foreground">데이터를 불러오는 중...</div>
                 </div>
-              ) : employeeData.length === 0 ? (
+              ) : !employeeData || employeeData.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="text-muted-foreground">
                     아직 업로드된 종사자 데이터가 없습니다.
@@ -541,9 +791,23 @@ export default function EmployeeDataPage() {
                             // 전담사회복지사 필터링 시에는 재직 전담사회복지사 수만 표시
                             <div className="p-4 bg-blue-100 rounded-md">
                               <div className="text-lg font-semibold">
-                                {filteredData.filter(emp => 
-                                  emp.isActive && (emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사')
-                                ).length}명
+                                {(employeeData || []).filter(emp => {
+                                  // 전담사회복지사인지 확인
+                                  const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
+                                  if (!isSocialWorker) return false;
+                                  
+                                  // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
+                                  if (emp.resignDate) {
+                                    try {
+                                      const resignDate = new Date(emp.resignDate);
+                                      const today = new Date();
+                                      return resignDate > today;
+                                    } catch {
+                                      return false;
+                                    }
+                                  }
+                                  return emp.isActive;
+                                }).length}명
                               </div>
                               <div className="text-xs text-blue-700">재직 전담사회복지사</div>
                             </div>
@@ -551,9 +815,22 @@ export default function EmployeeDataPage() {
                             // 생활지원사 필터링 시에는 재직 생활지원사 수만 표시
                             <div className="p-4 bg-green-100 rounded-md">
                               <div className="text-lg font-semibold">
-                                {filteredData.filter(emp => 
-                                  emp.isActive && emp.jobType === '생활지원사'
-                                ).length}명
+                                {(employeeData || []).filter(emp => {
+                                  // 생활지원사인지 확인
+                                  if (emp.jobType !== '생활지원사') return false;
+                                  
+                                  // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
+                                  if (emp.resignDate) {
+                                    try {
+                                      const resignDate = new Date(emp.resignDate);
+                                      const today = new Date();
+                                      return resignDate > today;
+                                    } catch {
+                                      return false;
+                                    }
+                                  }
+                                  return emp.isActive;
+                                }).length}명
                               </div>
                               <div className="text-xs text-green-700">재직 생활지원사</div>
                             </div>
@@ -562,23 +839,63 @@ export default function EmployeeDataPage() {
                             <>
                               <div className="p-4 bg-muted rounded-md">
                                 <div className="text-lg font-semibold">
-                                  {filteredData.filter(emp => emp.isActive).length}명
+                                  {(employeeData || []).filter(emp => {
+                                    // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
+                                    if (emp.resignDate) {
+                                      try {
+                                        const resignDate = new Date(emp.resignDate);
+                                        const today = new Date();
+                                        return resignDate > today; // 퇴사일이 미래이면 재직
+                                      } catch {
+                                        return false; // 퇴사일 파싱 실패시 퇴직으로 간주
+                                      }
+                                    }
+                                    // 퇴사일이 없으면 기본 isActive 값 사용
+                                    return emp.isActive;
+                                  }).length}명
                                 </div>
                                 <div className="text-xs text-muted-foreground">전체 재직자</div>
                               </div>
                               <div className="p-4 bg-blue-50 rounded-md">
                                 <div className="text-lg font-semibold">
-                                  {filteredData.filter(emp => 
-                                    emp.isActive && (emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사')
-                                  ).length}명
+                                  {(employeeData || []).filter(emp => {
+                                    // 전담사회복지사인지 확인
+                                    const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
+                                    if (!isSocialWorker) return false;
+                                    
+                                    // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
+                                    if (emp.resignDate) {
+                                      try {
+                                        const resignDate = new Date(emp.resignDate);
+                                        const today = new Date();
+                                        return resignDate > today;
+                                      } catch {
+                                        return false;
+                                      }
+                                    }
+                                    return emp.isActive;
+                                  }).length}명
                                 </div>
                                 <div className="text-xs text-blue-600">전담사회복지사</div>
                               </div>
                               <div className="p-4 bg-green-50 rounded-md">
                                 <div className="text-lg font-semibold">
-                                  {filteredData.filter(emp => 
-                                    emp.isActive && emp.jobType === '생활지원사'
-                                  ).length}명
+                                  {(employeeData || []).filter(emp => {
+                                    // 생활지원사인지 확인
+                                    if (emp.jobType !== '생활지원사') return false;
+                                    
+                                    // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
+                                    if (emp.resignDate) {
+                                      try {
+                                        const resignDate = new Date(emp.resignDate);
+                                        const today = new Date();
+                                        return resignDate > today;
+                                      } catch {
+                                        return false;
+                                      }
+                                    }
+                                    return emp.isActive;
+                                  }).length}명
                                 </div>
                                 <div className="text-xs text-green-600">생활지원사</div>
                               </div>

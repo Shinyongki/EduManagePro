@@ -46,8 +46,8 @@ interface EducationStore {
   setParticipantData: (data: EducationParticipant[]) => void;
   setEmployeeData: (data: EmployeeData[]) => void;
   loadFromIndexedDB: () => Promise<void>;
-  loadSpecificData: (type: 'basic' | 'advanced' | 'integrated' | 'participant') => Promise<void>;
-  forceReloadData: (type: 'basic' | 'advanced' | 'integrated' | 'participant') => Promise<void>;
+  loadSpecificData: (type: 'basic' | 'advanced' | 'integrated' | 'participant' | 'employee') => Promise<void>;
+  forceReloadData: (type: 'basic' | 'advanced' | 'integrated' | 'participant' | 'employee') => Promise<void>;
   saveToIndexedDB: () => Promise<void>;
   clearAllData: () => Promise<void>;
   getEducationStats: () => {
@@ -212,7 +212,7 @@ export const useEducationStore = create<EducationStore>()(
         }
       },
 
-      loadSpecificData: async (type: 'basic' | 'advanced' | 'integrated' | 'participant') => {
+      loadSpecificData: async (type: 'basic' | 'advanced' | 'integrated' | 'participant' | 'employee') => {
         const state = get();
         
         // 이미 로드된 경우 스킵
@@ -220,7 +220,8 @@ export const useEducationStore = create<EducationStore>()(
           (type === 'basic' && state.isLoaded.basicEducation) ||
           (type === 'advanced' && state.isLoaded.advancedEducation) ||
           (type === 'integrated' && state.isLoaded.integratedAnalysis) ||
-          (type === 'participant' && state.isLoaded.participant)
+          (type === 'participant' && state.isLoaded.participant) ||
+          (type === 'employee' && state.isLoaded.employee)
         ) {
           console.log(`📦 Data "${type}" already loaded, skipping...`);
           return;
@@ -261,6 +262,14 @@ export const useEducationStore = create<EducationStore>()(
                 isLoaded: { ...state.isLoaded, participant: true }
               }));
               break;
+              
+            case 'employee':
+              const employeeData = await educationDB.getItem<EmployeeData[]>('employeeData');
+              set((state) => ({
+                employeeData: employeeData || [],
+                isLoaded: { ...state.isLoaded, employee: true }
+              }));
+              break;
           }
           
           console.log(`✅ "${type}" data loaded successfully`);
@@ -269,7 +278,7 @@ export const useEducationStore = create<EducationStore>()(
         }
       },
 
-      forceReloadData: async (type: 'basic' | 'advanced' | 'integrated' | 'participant') => {
+      forceReloadData: async (type: 'basic' | 'advanced' | 'integrated' | 'participant' | 'employee') => {
         try {
           console.log(`🔄 Force reloading "${type}" data from IndexedDB...`);
           
@@ -308,6 +317,15 @@ export const useEducationStore = create<EducationStore>()(
                 isLoaded: { ...state.isLoaded, participant: true }
               }));
               console.log(`✅ Force reloaded participant data: ${(participantData || []).length} records`);
+              break;
+              
+            case 'employee':
+              const employeeData = await educationDB.getItem<EmployeeData[]>('employeeData');
+              set((state) => ({
+                employeeData: employeeData || [],
+                isLoaded: { ...state.isLoaded, employee: true }
+              }));
+              console.log(`✅ Force reloaded employee data: ${(employeeData || []).length} records`);
               break;
           }
         } catch (error) {
@@ -518,7 +536,7 @@ export const useEducationStore = create<EducationStore>()(
           const { employeeData } = get();
           
           // 🔥 중요: 종사자 관리 데이터 우선 처리 로직 (생년월일 기준 동일인 판별)
-          const matchingEmployee = employeeData.find(emp => 
+          const matchingEmployee = (employeeData || []).find(emp => 
             emp.name === participant.name && 
             emp.birthDate === participant.birthDate
           );
@@ -700,7 +718,7 @@ export const useEducationStore = create<EducationStore>()(
           const { employeeData } = get();
           
           // 🔥 중요: 종사자 관리 데이터 우선 처리 로직 (생년월일 기준 동일인 판별)
-          const matchingEmployee = employeeData.find(emp => 
+          const matchingEmployee = (employeeData || []).find(emp => 
             emp.name === participant.name && 
             emp.birthDate === participant.birthDate
           );
@@ -884,14 +902,46 @@ export const useEducationStore = create<EducationStore>()(
       },
 
       getDataInconsistencies: () => {
-        const { participantData, employeeData } = get();
+        const { participantData, employeeData: rawEmployeeData } = get();
         
         console.log('\n🔍 데이터 일관성 검사 시작 (생년월일 기준 동일인 판별)');
         console.log('참가자 데이터(배움터):', participantData.length, '명');
-        console.log('종사자 데이터(모인우리):', employeeData.length, '명');
+        console.log('종사자 데이터(모인우리) 원본:', rawEmployeeData.length, '명');
         
-        // 종사자 데이터가 없는 경우 경고
-        if (employeeData.length === 0) {
+        // 종사자 데이터 보정 (컬럼 밀림 수정) - 강화된 로직 적용
+        const employeeData = rawEmployeeData.map(emp => {
+          // 데이터 검증 및 디버깅 (교육 스토어)
+          if (emp.name === '백현태') {
+            console.log(`🔍 [교육스토어] 백현태님 원본 데이터:`, emp);
+          }
+          
+          // 기존 보정 로직도 유지 (일반적인 1칸 밀림)
+          if (emp.name === '특화' && emp.careerType && 
+              typeof emp.careerType === 'string' && 
+              emp.careerType.length >= 2 && 
+              emp.careerType.length <= 4 && 
+              /^[가-힣]+$/.test(emp.careerType)) {
+            
+            console.log(`🔧 [일관성 검사] 일반 컬럼 밀림 보정: "${emp.name}" → "${emp.careerType}" (기관: ${emp.institution})`);
+            
+            return {
+              ...emp,
+              name: emp.careerType,              // 실제 이름
+              careerType: emp.birthDate,         // 경력 (4년이상)
+              birthDate: emp.gender,             // 생년월일 (1990-04-10)
+              gender: emp.hireDate,              // 성별 (남)
+              hireDate: emp.learningId,          // 입사일을 찾아야 함
+              corrected: true,
+              correctionType: 'column_shift_analysis'
+            };
+          }
+          return emp;
+        });
+        
+        console.log('종사자 데이터 보정 후:', employeeData.length, '명');
+        
+        // 원본 종사자 데이터가 없는 경우만 경고
+        if (rawEmployeeData.length === 0) {
           console.warn('⚠️ 종사자 데이터(모인우리)가 없습니다. 종사자 데이터를 먼저 업로드해주세요.');
           console.log('\n📊 이전 17명 불일치 데이터 추적 중...');
           
@@ -1007,6 +1057,25 @@ export const useEducationStore = create<EducationStore>()(
         // 생년월일과 이름으로 동일인 매칭 함수 (유연한 매칭)
         const findMatchingEmployee = (participant: EducationParticipant): EmployeeData | null => {
           if (!participant.name) return null;
+          
+          // 백현태님 특별 디버깅
+          if (participant.name?.includes('백현태')) {
+            console.log('\n🔍 [보정된 데이터로] 백현태님 매칭 디버깅:');
+            console.log('- 참가자 이름:', participant.name);
+            console.log('- 참가자 생년월일:', participant.birthDate);
+            console.log('- 보정된 종사자 데이터 중 이름이 일치하는 사람들:');
+            
+            const nameMatches = employeeData.filter(emp => emp.name?.includes('백현태'));
+            nameMatches.forEach((emp, idx) => {
+              console.log(`  ${idx + 1}. 이름: ${emp.name}, 생년월일: ${emp.birthDate}, 상태: ${emp.isActive}, 퇴사일: ${emp.resignDate}, 보정됨: ${emp.corrected}`);
+            });
+            
+            if (nameMatches.length === 0) {
+              console.log('  ⚠️ 보정된 종사자 데이터에도 백현태님이 없습니다!');
+            } else {
+              console.log(`  ✅ 보정된 데이터에서 ${nameMatches.length}명 발견!`);
+            }
+          }
           
           return employeeData.find(emp => {
             // 이름 매칭 (정확 일치)
