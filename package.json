@@ -1,14 +1,22 @@
 {
   "name": "rest-express",
   "version": "1.0.0",
+  "description": "교육-종사자 연동분석 시스템 - 교육 데이터와 종사자 데이터를 연동하여 종합적인 분석을 제공하는 데스크톱 애플리케이션",
+  "author": "EduManagePro Team",
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx server/index.ts",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "dev": "cross-env NODE_ENV=development tsx server/index.ts",
+    "build": "vite build && esbuild server/index.ts --platform=node --bundle --format=esm --outdir=dist --external:electron --external:@babel/preset-typescript/package.json --external:../pkg --external:lightningcss --external:path --external:fs --external:os --external:crypto --external:util --external:events --external:stream --external:buffer --external:url --external:querystring --external:http --external:https --external:zlib",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "electron": "electron electron/main.js",
+    "electron-dev": "cross-env NODE_ENV=development electron electron/main.js",
+    "build-electron": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --dir",
+    "pack": "electron-builder --dir",
+    "release": "npm run build && electron-builder"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.16.0",
@@ -43,6 +51,7 @@
     "@radix-ui/react-toggle-group": "^1.1.3",
     "@radix-ui/react-tooltip": "^1.2.0",
     "@tanstack/react-query": "^5.60.5",
+    "@types/multer": "^2.0.0",
     "@types/papaparse": "^5.3.16",
     "@uppy/aws-s3": "^4.3.2",
     "@uppy/core": "^4.5.2",
@@ -51,6 +60,8 @@
     "@uppy/file-input": "^4.2.2",
     "@uppy/progress-bar": "^4.3.2",
     "@uppy/react": "^4.5.2",
+    "axios": "^1.11.0",
+    "cheerio": "^1.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -61,11 +72,15 @@
     "embla-carousel-react": "^8.6.0",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
+    "file-saver": "^2.0.5",
+    "form-data": "^4.0.4",
     "framer-motion": "^11.13.1",
     "google-auth-library": "^10.2.1",
     "input-otp": "^1.4.2",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.453.0",
     "memorystore": "^1.6.7",
+    "multer": "^2.0.2",
     "next-themes": "^0.4.6",
     "papaparse": "^5.5.3",
     "passport": "^0.7.0",
@@ -76,6 +91,7 @@
     "react-dropzone": "^14.3.8",
     "react-hook-form": "^7.55.0",
     "react-icons": "^5.4.0",
+    "react-leaflet": "^4.2.1",
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.2",
     "tailwind-merge": "^2.6.0",
@@ -97,6 +113,7 @@
     "@types/connect-pg-simple": "^7.0.3",
     "@types/express": "4.17.21",
     "@types/express-session": "^1.18.0",
+    "@types/leaflet": "^1.9.20",
     "@types/node": "20.16.11",
     "@types/passport": "^1.0.16",
     "@types/passport-local": "^1.0.38",
@@ -105,7 +122,10 @@
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^10.0.0",
     "drizzle-kit": "^0.30.4",
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
     "esbuild": "^0.25.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
@@ -115,5 +135,29 @@
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"
+  },
+  "main": "electron/main.js",
+  "homepage": "./",
+  "build": {
+    "appId": "com.edumangepro.app",
+    "productName": "EduManagePro",
+    "directories": {
+      "output": "dist-electron-working"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "dir",
+      "verifyUpdateCodeSignature": false,
+      "forceCodeSigning": false
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   }
 }

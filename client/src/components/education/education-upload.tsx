@@ -5,10 +5,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import FileUpload from "@/components/ui/file-upload";
 import { Badge } from "@/components/ui/badge";
-import { useEducationStore } from "@/store/education-store";
+import { useEducationData } from "@/hooks/use-education-data";
 import { processEducationFile } from "@/lib/file-processor";
 import { useToast } from "@/hooks/use-toast";
-import { BookOpen, Award } from "lucide-react";
+import { BookOpen, Award, Eye, Upload } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import type { EducationData } from "@shared/schema";
 
 interface EducationUploadProps {
   type: "basic" | "advanced";
@@ -17,14 +26,17 @@ interface EducationUploadProps {
 export default function EducationUpload({ type }: EducationUploadProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [textInput, setTextInput] = useState("");
+  const [previewData, setPreviewData] = useState<EducationData[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
   const { toast } = useToast();
   
   const { 
     basicEducationData, 
     advancedEducationData, 
     setBasicEducationData, 
-    setAdvancedEducationData 
-  } = useEducationStore();
+    setAdvancedEducationData,
+    forceReloadData
+  } = useEducationData();
 
   const isBasic = type === "basic";
   const data = isBasic ? basicEducationData : advancedEducationData;
@@ -51,16 +63,12 @@ export default function EducationUpload({ type }: EducationUploadProps) {
     setIsLoading(true);
     try {
       const parsedData = await processEducationFile(file);
-      
-      if (isBasic) {
-        setBasicEducationData(parsedData);
-      } else {
-        setAdvancedEducationData(parsedData);
-      }
+      setPreviewData(parsedData);
+      setShowPreview(true);
 
       toast({
-        title: "파일 업로드 성공",
-        description: `${parsedData.length}개의 교육 데이터가 처리되었습니다.`,
+        title: "파일 파싱 완료",
+        description: `${parsedData.length}개의 교육 데이터가 파싱되었습니다. 미리보기를 확인하고 업로드하세요.`,
       });
     } catch (error) {
       toast({
@@ -71,6 +79,32 @@ export default function EducationUpload({ type }: EducationUploadProps) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleConfirmUpload = async () => {
+    if (previewData.length === 0) return;
+
+    // 각각 독립적으로 저장 (다른 데이터 건드리지 않음)
+    if (isBasic) {
+      setBasicEducationData(previewData);
+      console.log(`✅ Basic education data uploaded: ${previewData.length} records`);
+    } else {
+      setAdvancedEducationData(previewData);
+      console.log(`✅ Advanced education data uploaded: ${previewData.length} records`);
+    }
+
+    setShowPreview(false);
+    setPreviewData([]);
+
+    toast({
+      title: "업로드 완료",
+      description: `${previewData.length}개의 교육 데이터가 업로드되었습니다.`,
+    });
+  };
+
+  const handleCancelPreview = () => {
+    setShowPreview(false);
+    setPreviewData([]);
   };
 
   const handleTextSave = () => {
@@ -133,6 +167,120 @@ export default function EducationUpload({ type }: EducationUploadProps) {
       description: "교육 데이터가 초기화되었습니다.",
     });
   };
+
+  if (showPreview) {
+    return (
+      <Card data-testid={`education-preview-${type}`}>
+        <CardHeader className="border-b border-slate-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">
+                {config[type].title} - 미리보기
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                파싱된 데이터를 확인하고 업로드하세요 ({previewData.length}개 항목)
+              </p>
+            </div>
+            <Badge className="status-warning">
+              <Eye className="w-3 h-3 mr-1.5" />
+              미리보기
+            </Badge>
+          </div>
+        </CardHeader>
+        
+        <CardContent className="p-6">
+          <div className="max-h-96 overflow-auto border rounded-md">
+            <Table className="min-w-[1400px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>연번</TableHead>
+                  <TableHead>수강생명</TableHead>
+                  <TableHead>ID</TableHead>
+                  <TableHead>기관코드</TableHead>
+                  <TableHead>수행기관명</TableHead>
+                  <TableHead>과정명</TableHead>
+                  <TableHead>직군</TableHead>
+                  <TableHead>교육신청일자</TableHead>
+                  <TableHead>유형</TableHead>
+                  <TableHead>시도</TableHead>
+                  <TableHead>시군구</TableHead>
+                  <TableHead>교육시간</TableHead>
+                  <TableHead>진도율</TableHead>
+                  <TableHead>점수</TableHead>
+                  <TableHead>수료여부</TableHead>
+                  <TableHead>수료일</TableHead>
+                  <TableHead>교육분류</TableHead>
+                  <TableHead>복합키</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewData.slice(0, 10).map((item, index) => (
+                  <TableRow key={index}>
+                    <TableCell className="font-medium">{index + 1}</TableCell>
+                    <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableCell>{item.id}</TableCell>
+                    <TableCell>{item.institutionCode || '-'}</TableCell>
+                    <TableCell>{item.institution}</TableCell>
+                    <TableCell>{item.course}</TableCell>
+                    <TableCell>{item.jobType || '-'}</TableCell>
+                    <TableCell>{item.applicationDate ? (
+                      item.applicationDate instanceof Date 
+                        ? item.applicationDate.toLocaleDateString('ko-KR')
+                        : new Date(item.applicationDate).toLocaleDateString('ko-KR')
+                    ) : '-'}</TableCell>
+                    <TableCell>{item.institutionType || '-'}</TableCell>
+                    <TableCell>{item.region || '-'}</TableCell>
+                    <TableCell>{item.district || '-'}</TableCell>
+                    <TableCell>{item.educationHours || 0}</TableCell>
+                    <TableCell>{item.progress || 0}%</TableCell>
+                    <TableCell>{item.score || 0}</TableCell>
+                    <TableCell>
+                      <Badge variant={item.status === '수료' ? 'default' : 'destructive'}>
+                        {item.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {item.completionDate ? (
+                        item.completionDate instanceof Date 
+                          ? item.completionDate.toLocaleDateString('ko-KR')
+                          : new Date(item.completionDate).toLocaleDateString('ko-KR')
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{item.courseType}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs max-w-32 truncate" title={item.concatenatedKey}>
+                      {item.concatenatedKey || '-'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {previewData.length > 10 && (
+              <div className="p-4 text-center text-sm text-muted-foreground border-t">
+                {previewData.length - 10}개 항목이 더 있습니다.
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-6 flex justify-end space-x-3">
+            <Button 
+              variant="outline" 
+              onClick={handleCancelPreview}
+            >
+              취소
+            </Button>
+            <Button 
+              onClick={handleConfirmUpload}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              업로드 확정
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card data-testid={`education-upload-${type}`}>

@@ -2,11 +2,39 @@ import { useEducationStore } from "@/store/education-store";
 import { useEmployeeStore } from "@/store/employee-store";
 import { useAnalysisStore } from "@/store/analysis-store";
 import { Users, GraduationCap, TrendingUp, Building } from "lucide-react";
+import { useState, useEffect } from "react";
 
 export default function OverviewCards() {
   const { getEducationStats } = useEducationStore();
   const { getEmployeeStats } = useEmployeeStore();
   const { getAnalysisStats } = useAnalysisStore();
+  
+  const [matchingStats, setMatchingStats] = useState({
+    totalParticipants: 0,
+    basicCompletedCount: 0,
+    advancedCompletedCount: 0,
+    excellentCount: 0,
+    basicCompletionRate: 0,
+    advancedCompletionRate: 0,
+    excellentRate: 0
+  });
+
+  // 교육 매칭 통계 로드
+  useEffect(() => {
+    const fetchMatchingStats = async () => {
+      try {
+        const response = await fetch('/api/education-statistics');
+        if (response.ok) {
+          const stats = await response.json();
+          setMatchingStats(stats);
+        }
+      } catch (error) {
+        console.error('Failed to fetch matching statistics:', error);
+      }
+    };
+    
+    fetchMatchingStats();
+  }, []);
   
   const educationStats = getEducationStats();
   const employeeStats = getEmployeeStats();
@@ -14,41 +42,33 @@ export default function OverviewCards() {
 
   const cards = [
     {
-      title: "총 종사자",
-      value: employeeStats.totalEmployees.toLocaleString(),
-      subtitle: "전년 대비 +5.2%",
+      title: "교육 수강자",
+      value: matchingStats.totalParticipants.toLocaleString(),
+      subtitle: `기초 ${matchingStats.basicCompletedCount}명 / 심화 ${matchingStats.advancedCompletedCount}명 수료`,
       icon: Users,
       gradient: "from-blue-500 to-blue-600",
-      testId: "overview-total-employees"
+      testId: "overview-total-participants"
     },
     {
-      title: "교육 완료율",
-      value: `${analysisStats.completionRate}%`,
-      subtitle: "목표 대비 +2.3%",
+      title: "기초 교육 완료율",
+      value: `${matchingStats.basicCompletionRate}%`,
+      subtitle: `${matchingStats.basicCompletedCount}명 수료 완료`,
       icon: GraduationCap,
       gradient: "from-green-500 to-green-600",
-      testId: "overview-completion-rate"
+      testId: "overview-basic-completion-rate"
     },
     {
-      title: "충원률",
-      value: `${employeeStats.fillRate}%`,
-      subtitle: "전월 대비 +1.5%",
+      title: "심화 교육 완료율",
+      value: `${matchingStats.advancedCompletionRate}%`,
+      subtitle: `${matchingStats.advancedCompletedCount}명 수료 완료`,
       icon: TrendingUp,
       gradient: "from-amber-500 to-amber-600",
-      testId: "overview-fill-rate"
-    },
-    {
-      title: "기관 수",
-      value: employeeStats.institutionCount.toLocaleString(),
-      subtitle: "활성 기관",
-      icon: Building,
-      gradient: "from-purple-500 to-purple-600",
-      testId: "overview-institution-count"
+      testId: "overview-advanced-completion-rate"
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" data-testid="overview-cards">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="overview-cards">
       {cards.map((card, index) => (
         <div 
           key={index} 

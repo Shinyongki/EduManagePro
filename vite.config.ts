@@ -33,5 +33,11 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    proxy: {
+      "/api": {
+        target: "http://localhost:3016",
+        changeOrigin: true,
+      },
+    },
   },
 });
