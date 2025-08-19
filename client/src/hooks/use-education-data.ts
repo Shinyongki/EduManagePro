@@ -38,7 +38,7 @@ export function useEducationData() {
   }, []); // 의존성 제거로 한 번만 실행
 
   // 특정 데이터를 필요시에만 로드하는 함수
-  const loadLazyData = useCallback(async (type: 'basic' | 'advanced' | 'participant') => {
+  const loadLazyData = useCallback(async (type: 'basic' | 'advanced' | 'participant' | 'employee') => {
     try {
       await store.loadSpecificData(type);
     } catch (err) {
@@ -47,7 +47,7 @@ export function useEducationData() {
   }, [store.loadSpecificData]); // 안정적인 메서드만 의존성으로
 
   // 강제 리로드 함수 (이미 로드된 데이터도 다시 로드)
-  const forceReloadData = useCallback(async (type: 'basic' | 'advanced' | 'participant') => {
+  const forceReloadData = useCallback(async (type: 'basic' | 'advanced' | 'participant' | 'employee') => {
     try {
       await store.forceReloadData(type);
     } catch (err) {

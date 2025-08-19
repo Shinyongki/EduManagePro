@@ -67,7 +67,6 @@ export default function AdvancedEducationPage() {
   const [activeTab, setActiveTab] = useState('upload');
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
@@ -181,16 +180,6 @@ export default function AdvancedEducationPage() {
   // 실제 데이터만 사용 (Mock 데이터 제거)
   const analysisData = integratedAnalysisData;
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
-      toast({
-        title: "파일 선택됨",
-        description: `${file.name}이 선택되었습니다.`,
-      });
-    }
-  };
 
   // 날짜별 업로드 함수
   const handleDateUpload = async (date: string, description: string, file: File) => {
@@ -316,69 +305,6 @@ export default function AdvancedEducationPage() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!uploadedFile) {
-      toast({
-        title: "파일을 선택해주세요",
-        description: "업로드할 심화 교육 데이터 파일을 선택해주세요.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', uploadedFile);
-      formData.append('type', 'advanced');
-
-      const response = await fetch('/api/education/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('파일 업로드에 실패했습니다.');
-      }
-
-      const result = await response.json();
-      
-      toast({
-        title: "업로드 완료",
-        description: `${result.count}개의 심화 교육 데이터가 성공적으로 업로드되었습니다.`,
-      });
-      
-      // 파일 선택 초기화
-      setUploadedFile(null);
-      const fileInput = document.getElementById('advanced-education-file') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-      
-      // 서버에서 IndexedDB로 자동 동기화
-      console.log('🔄 서버 → IndexedDB 자동 동기화 시작...');
-      const syncResponse = await fetch('/api/education/advanced');
-      if (syncResponse.ok) {
-        const syncData = await syncResponse.json();
-        const { IndexedDBStorage } = await import('@/lib/indexeddb');
-        const educationDB = new IndexedDBStorage();
-        await educationDB.setItem('advancedEducationData', syncData);
-        setAdvancedEducationData(syncData);
-        console.log(`✅ IndexedDB 동기화 완료: ${syncData.length}개 심화교육 데이터`);
-      }
-      
-      // 목록 탭으로 이동
-      setActiveTab('list');
-      
-    } catch (error) {
-      toast({
-        title: "업로드 실패",
-        description: error instanceof Error ? error.message : "파일 업로드 중 오류가 발생했습니다.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -423,64 +349,17 @@ export default function AdvancedEducationPage() {
           
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Award className="h-5 w-5 text-purple-600" />
-                심화 교육 데이터 업로드
-              </CardTitle>
-              <CardDescription>
-                Excel 파일을 통해 심화 교육 수료 데이터를 일괄 업로드합니다
-              </CardDescription>
+              <CardTitle className="text-lg">데이터 관리</CardTitle>
+              <CardDescription>심화 교육 데이터를 관리합니다</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <Alert>
-                <Eye className="h-4 w-4" />
-                <AlertDescription>
-                  <div className="space-y-2">
-                    <p className="font-semibold">심화교육 업로드 파일은 다음 헤더를 포함해야 합니다:</p>
-                    <ul className="text-sm list-disc ml-4 space-y-1">
-                      <li>이름, 기관코드, 기관명, 직군 (전담사회복지사/생활지원사)</li>
-                      <li>과정명, 경력구분 (신규자/경력자), 수료상태</li>
-                      <li>특화서비스 관련 교육 여부, 수료일</li>
-                    </ul>
-                  </div>
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-2">
-                <Label htmlFor="advanced-education-file">파일 선택</Label>
-                <Input
-                  id="advanced-education-file"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                />
-              </div>
-
-              {uploadedFile && (
-                <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                  <Eye className="h-4 w-4" />
-                  <span className="text-sm">{uploadedFile.name}</span>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <Button 
-                  onClick={handleUpload} 
-                  disabled={!uploadedFile || isUploading}
-                  className="flex-1"
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  {isUploading ? '업로드 중...' : '업로드'}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleClearData}
-                  disabled={isLoading || !advancedEducationData || advancedEducationData.length === 0}
-                >
-                  데이터 초기화
-                </Button>
-              </div>
+            <CardContent>
+              <Button
+                variant="destructive"
+                onClick={handleClearData}
+                disabled={isLoading || !advancedEducationData || advancedEducationData.length === 0}
+              >
+                데이터 초기화
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

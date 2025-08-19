@@ -66,6 +66,25 @@ export class IntegratedDataAnalyzer {
     // 기관별로 데이터 집계
     console.log(`\n🏢 기관 데이터 분석 시작: ${institutionData.length}개 기관`);
     console.log(`👥 종사자 데이터: ${employeeData.length}명`);
+    console.log(`📚 기초교육 데이터: ${basicEducationData.length}명`);
+    console.log(`🎓 심화교육 데이터: ${advancedEducationData.length}명`);
+    console.log(`👨‍🎓 참가자 데이터: ${participantData.length}명`);
+    
+    // 광역지원기관 확인
+    const gwangyeokInstitution = institutionData.find(inst => inst.code === 'A48000002');
+    if (gwangyeokInstitution) {
+      console.log('\\n🎯 광역지원기관 발견:', gwangyeokInstitution.name, '(코드:', gwangyeokInstitution.code, ')');
+    } else {
+      console.log('\\n❌ 광역지원기관(A48000002) 기관 데이터에서 미발견');
+      
+      // 참가자 데이터에서 광역지원기관 확인
+      const gwangyeokParticipants = participantData.filter(p => p.institutionCode === 'A48000002');
+      console.log(`참가자 데이터에서 A48000002 기관코드: ${gwangyeokParticipants.length}명`);
+      
+      if (gwangyeokParticipants.length > 0) {
+        console.log('광역지원기관 참가자 기관명들:', [...new Set(gwangyeokParticipants.map(p => p.institution))]);
+      }
+    }
     
     for (const institution of institutionData) {
       // 해당 기관의 종사자 데이터 필터링 (다양한 매칭 방법 시도)
@@ -167,11 +186,38 @@ export class IntegratedDataAnalyzer {
       }
       
       // 교육 참가자 데이터 필터링 (디버깅 추가)
-      const institutionParticipants = participantData.filter(p => 
-        p.institution?.includes(institution.name) ||
-        p.institutionCode === institution.code ||
-        p.institution === institution.name
-      );
+      const institutionParticipants = participantData.filter(p => {
+        // 기관 코드 매칭
+        if (p.institutionCode === institution.code) return true;
+        
+        // 광역지원기관 특별 처리
+        if (institution.code === 'A48000002') {
+          return p.institution === '(광역)(재)경상남도사회서비스원';
+        }
+        
+        // 기관명 완전 일치
+        if (p.institution === institution.name) return true;
+        
+        // 기관명 부분 매칭 (양방향)
+        if (p.institution?.includes(institution.name) || institution.name?.includes(p.institution)) return true;
+        
+        // 공백 제거 후 매칭
+        const pInstClean = p.institution?.replace(/\s+/g, '').toLowerCase();
+        const instNameClean = institution.name?.replace(/\s+/g, '').toLowerCase();
+        if (pInstClean === instNameClean) return true;
+        
+        // 키워드 기반 매칭 (예: "거제노인" 같은 핵심 단어)
+        const instKeywords = institution.name?.split(/[\s()-]+/).filter(word => word.length > 2);
+        const pInstKeywords = p.institution?.split(/[\s()-]+/).filter(word => word.length > 2);
+        if (instKeywords && pInstKeywords) {
+          const matchCount = instKeywords.filter(keyword => 
+            pInstKeywords.some(pKeyword => pKeyword.includes(keyword) || keyword.includes(pKeyword))
+          ).length;
+          if (matchCount >= 2) return true; // 2개 이상 키워드 매칭
+        }
+        
+        return false;
+      });
       
       // 거제노인통합지원센터 검증을 위한 디버깅
       if (institution.code === 'A48310001' || institution.name?.includes('거제노인통합지원센터')) {
@@ -200,25 +246,152 @@ export class IntegratedDataAnalyzer {
         console.log(`코드 "A48310001" 매칭 참가자: ${codeMatches.length}명`);
       }
       
-      // 교육 이수 현황 계산
-      const basicCompleted = institutionParticipants.filter(p => 
+      // 교육 이수 현황 계산 - 기초와 심화 모두 수료한 최종수료자만 카운트
+      let basicCompleted = institutionParticipants.filter(p => 
         p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료'
       );
       
-      const advancedCompleted = institutionParticipants.filter(p => 
+      let advancedCompleted = institutionParticipants.filter(p => 
         p.advancedEducation === '완료' || p.advancedEducation === '수료'
       );
       
-      // 직무별 교육 이수자 분류
-      const socialEducationCompleted = institutionParticipants.filter(p => 
-        (p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료') &&
-        (p.jobType?.includes('전담') || p.jobType === '전담사회복지사')
+      // 최종 이수인원: 기초와 심화 모두 수료한 사람들 (교차 매칭)
+      let finalCompleted = institutionParticipants.filter(p => {
+        const hasBasic = p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료';
+        const hasAdvanced = p.advancedEducation === '완료' || p.advancedEducation === '수료';
+        return hasBasic && hasAdvanced;
+      });
+      
+      // participantData가 없거나 매칭이 안 된 경우, basicEducationData와 advancedEducationData에서 직접 찾기
+      if (institutionParticipants.length === 0 && (basicEducationData.length > 0 || advancedEducationData.length > 0)) {
+        console.log(`📚 [${institution.name}] participantData 매칭 실패, educationData에서 직접 검색`);
+        
+        // basicEducationData에서 해당 기관 찾기
+        const institutionBasicEdu = basicEducationData.filter(edu => {
+          // 기관 코드 매칭
+          if (edu.institutionCode === institution.code) return true;
+          // 기관명 매칭
+          if (edu.institution === institution.name) return true;
+          if (edu.institution?.includes(institution.name) || institution.name?.includes(edu.institution)) return true;
+          
+          // 종사자 이름으로 매칭
+          const employeeMatch = institutionEmployees.some(emp => 
+            emp.name === edu.name || 
+            (emp.residentId && edu.residentId && emp.residentId === edu.residentId)
+          );
+          if (employeeMatch) return true;
+          
+          return false;
+        });
+        
+        // advancedEducationData에서 해당 기관 찾기
+        const institutionAdvancedEdu = advancedEducationData.filter(edu => {
+          // 기관 코드 매칭
+          if (edu.institutionCode === institution.code) return true;
+          // 기관명 매칭
+          if (edu.institution === institution.name) return true;
+          if (edu.institution?.includes(institution.name) || institution.name?.includes(edu.institution)) return true;
+          
+          // 종사자 이름으로 매칭
+          const employeeMatch = institutionEmployees.some(emp => 
+            emp.name === edu.name || 
+            (emp.residentId && edu.residentId && emp.residentId === edu.residentId)
+          );
+          if (employeeMatch) return true;
+          
+          return false;
+        });
+        
+        console.log(`   기초교육 매칭: ${institutionBasicEdu.length}명`);
+        console.log(`   심화교육 매칭: ${institutionAdvancedEdu.length}명`);
+        
+        // 교육 이수자로 변환
+        basicCompleted = institutionBasicEdu.filter(edu => 
+          edu.status === '수료' || edu.status === '완료' || edu.finalCompletion === '수료'
+        );
+        
+        advancedCompleted = institutionAdvancedEdu.filter(edu => 
+          edu.status === '수료' || edu.status === '완료'
+        );
+        
+        // 최종 이수인원: 기초와 심화 모두 수료한 사람들 (교차 매칭)
+        finalCompleted = institutionBasicEdu.filter(basicEdu => {
+          const hasBasic = basicEdu.status === '수료' || basicEdu.status === '완료' || basicEdu.finalCompletion === '수료';
+          const hasAdvanced = institutionAdvancedEdu.some(advEdu => 
+            (advEdu.name === basicEdu.name || 
+             (advEdu.residentId && basicEdu.residentId && advEdu.residentId === basicEdu.residentId)) &&
+            (advEdu.status === '수료' || advEdu.status === '완료')
+          );
+          return hasBasic && hasAdvanced;
+        });
+        
+        console.log(`   최종 이수인원 (기초+심화): ${finalCompleted.length}명`);
+      }
+      
+      // 광역지원기관 디버깅을 위한 특별 로깅
+      if (institution.code === 'A48000002' || 
+          institution.district?.includes('*광역지원기관') ||
+          institution.district?.includes('광역지원기관')) {
+        console.log(`\\n🔍 [광역지원기관 디버깅] ${institution.name}`);
+        console.log(`기관코드: ${institution.code}`);
+        console.log(`전체 재직자: ${activeEmployees.length}명`);
+        console.log(`참가자 데이터 매칭: ${institutionParticipants.length}명`);
+        console.log(`기초교육 완료자: ${basicCompleted.length}명`);
+        console.log(`심화교육 완료자: ${advancedCompleted.length}명`);
+        console.log(`최종 이수인원 (기초+심화): ${finalCompleted.length}명`);
+        
+        // 참가자별 상세 분석
+        if (institutionParticipants.length > 0) {
+          console.log(`\\n참가자별 교육 현황:`);
+          institutionParticipants.forEach((p, idx) => {
+            const hasBasic = p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료';
+            const hasAdvanced = p.advancedEducation === '완료' || p.advancedEducation === '수료';
+            console.log(`  ${idx + 1}. ${p.name} - 기초: ${p.basicTraining || 'N/A'}, 심화: ${p.advancedEducation || 'N/A'} (최종: ${hasBasic && hasAdvanced ? 'O' : 'X'})`);
+          });
+        } else {
+          console.log(`참가자 데이터 매칭 실패 - 기관명으로 재검색 필요`);
+          // 기관명으로 참가자 데이터 재검색
+          const manualParticipants = participantData.filter(p => 
+            p.institution?.includes('광역') || 
+            p.institution?.includes(institution.name?.replace(/\\s+/g, '')) ||
+            institution.name?.includes(p.institution?.replace(/\\s+/g, ''))
+          );
+          console.log(`수동 검색 결과: ${manualParticipants.length}명`);
+          if (manualParticipants.length > 0) {
+            console.log(`수동 검색된 기관명들:`, [...new Set(manualParticipants.map(p => p.institution))]);
+          }
+        }
+        console.log(`===============================\\n`);
+      }
+      
+      // 직무별 교육 이수자 분류 - 기초와 심화 모두 수료한 최종수료자만 카운트
+      let socialEducationCompleted = finalCompleted.filter(p => 
+        p.jobType?.includes('전담') || p.jobType === '전담사회복지사'
       );
       
-      const lifeEducationCompleted = institutionParticipants.filter(p => 
-        (p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료') &&
-        (p.jobType?.includes('생활지원') || p.jobType === '생활지원사')
+      let lifeEducationCompleted = finalCompleted.filter(p => 
+        p.jobType?.includes('생활지원') || p.jobType === '생활지원사'
       );
+      
+      // educationData에서 직무별 분류도 추가
+      if (institutionParticipants.length === 0 && finalCompleted.length > 0) {
+        // 종사자 데이터와 매칭하여 직무 구분
+        socialEducationCompleted = finalCompleted.filter(edu => {
+          const employee = institutionEmployees.find(emp => 
+            emp.name === edu.name || 
+            (emp.residentId && edu.residentId && emp.residentId === edu.residentId)
+          );
+          return employee && (employee.jobType?.includes('전담') || employee.jobType === '전담사회복지사');
+        });
+        
+        lifeEducationCompleted = finalCompleted.filter(edu => {
+          const employee = institutionEmployees.find(emp => 
+            emp.name === edu.name || 
+            (emp.residentId && edu.residentId && emp.residentId === edu.residentId)
+          );
+          return employee && (employee.jobType?.includes('생활지원') || employee.jobType === '생활지원사');
+        });
+      }
       
       // 근속기간 계산 함수 (일 단위로 반환)
       const calculateAverageTenure = (employees: EmployeeData[], jobTypeName: string): number => {
@@ -291,9 +464,9 @@ export class IntegratedDataAnalyzer {
       const govLifeEmploymentRate = (govAllocatedLife > 0 && !isNaN(lifeCount)) ? 
         Math.round((lifeCount / govAllocatedLife) * 100 * 10) / 10 : 0;
       
-      // 교육 이수율 계산 - NaN 방지
-      const totalEducationRate = (totalActive > 0 && !isNaN(basicCompleted.length)) ? 
-        Math.round((basicCompleted.length / totalActive) * 100 * 10) / 10 : 0;
+      // 교육 이수율 계산 - NaN 방지 (기초와 심화 모두 수료한 최종수료자 기준)
+      const totalEducationRate = (totalActive > 0 && !isNaN(finalCompleted.length)) ? 
+        Math.round((finalCompleted.length / totalActive) * 100 * 10) / 10 : 0;
       const socialEducationRate = (socialCount > 0 && !isNaN(socialEducationCompleted.length)) ? 
         Math.round((socialEducationCompleted.length / socialCount) * 100 * 10) / 10 : 0;
       const lifeEducationRate = (lifeCount > 0 && !isNaN(lifeEducationCompleted.length)) ? 
@@ -348,14 +521,14 @@ export class IntegratedDataAnalyzer {
         education_target_total: totalActive || 0, // H: 현재 재직 중인 전체 인원
         education_target_social: socialCount || 0, // H: 현재 재직 중인 전담사회복지사
         education_target_life: lifeCount || 0, // H: 현재 재직 중인 생활지원사
-        education_completed_total: basicCompleted.length || 0, // I: 이수인원
+        education_completed_total: finalCompleted.length || 0, // I: 이수인원 (기초+심화 모두 수료)
         education_completed_social: socialEducationCompleted.length || 0,
         education_completed_life: lifeEducationCompleted.length || 0,
         education_rate_total: isNaN(totalEducationRate) ? 0 : totalEducationRate, // (I/H) 이수율
         education_rate_social: isNaN(socialEducationRate) ? 0 : socialEducationRate,
         education_rate_life: isNaN(lifeEducationRate) ? 0 : lifeEducationRate,
-        education_d_rate_total: (totalActive > 0 && !isNaN(basicCompleted.length)) ? 
-          Math.round((basicCompleted.length / totalActive) * 100 * 10) / 10 : 0, // (I/D) 이수율
+        education_d_rate_total: (totalActive > 0 && !isNaN(finalCompleted.length)) ? 
+          Math.round((finalCompleted.length / totalActive) * 100 * 10) / 10 : 0, // (I/D) 이수율
         education_d_rate_social: (socialCount > 0 && !isNaN(socialEducationCompleted.length)) ? 
           Math.round((socialEducationCompleted.length / socialCount) * 100 * 10) / 10 : 0,
         education_d_rate_life: (lifeCount > 0 && !isNaN(lifeEducationCompleted.length)) ? 

@@ -33,6 +33,29 @@ export default function Sidebar({ className }: SidebarProps) {
       isActive: location === "/"
     },
     {
+      title: "종사자 관리",
+      icon: BriefcaseBusiness,
+      color: "text-orange-600",
+      bgColor: "bg-orange-50",
+      borderColor: "border-orange-200",
+      items: [
+        {
+          title: "종사자 데이터",
+          href: "/employee-data",
+          icon: UserCheck,
+          description: "종사자 정보 관리",
+          isActive: location === "/employee-data"
+        },
+        {
+          title: "기관 현황",
+          href: "/institution-data",
+          icon: Building,
+          description: "기관별 배치 현황",
+          isActive: location === "/institution-data"
+        }
+      ]
+    },
+    {
       title: "교육 관리",
       icon: GraduationCap,
       color: "text-green-600",
@@ -59,29 +82,6 @@ export default function Sidebar({ className }: SidebarProps) {
           icon: Users,
           description: "소속 회원 교육 이수 현황",
           isActive: location === "/participants"
-        }
-      ]
-    },
-    {
-      title: "종사자 관리",
-      icon: BriefcaseBusiness,
-      color: "text-orange-600",
-      bgColor: "bg-orange-50",
-      borderColor: "border-orange-200",
-      items: [
-        {
-          title: "종사자 데이터",
-          href: "/employee-data",
-          icon: UserCheck,
-          description: "종사자 정보 관리",
-          isActive: location === "/employee-data"
-        },
-        {
-          title: "기관 현황",
-          href: "/institution-data",
-          icon: Building,
-          description: "기관별 배치 현황",
-          isActive: location === "/institution-data"
         }
       ]
     },

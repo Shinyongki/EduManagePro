@@ -940,118 +940,11 @@ export const useEducationStore = create<EducationStore>()(
         
         console.log('종사자 데이터 보정 후:', employeeData.length, '명');
         
-        // 원본 종사자 데이터가 없는 경우만 경고
+        // 원본 종사자 데이터가 없는 경우 빈 배열 반환
         if (rawEmployeeData.length === 0) {
           console.warn('⚠️ 종사자 데이터(모인우리)가 없습니다. 종사자 데이터를 먼저 업로드해주세요.');
-          console.log('\n📊 이전 17명 불일치 데이터 추적 중...');
-          
-          // 이전에 발견된 17명의 데이터를 추적하기 위한 임시 분석
-          const potentialInconsistencies = [];
-          let foundCount = 0;
-          
-          // 모든 참가자 데이터를 스캔하여 잠재적 불일치 후보 찾기
-          participantData.forEach(participant => {
-            // 다음 조건 중 하나라도 해당하면 잠재적 불일치로 분류
-            const suspiciousConditions = [
-              // 상태와 isActive가 불일치
-              (participant.status === '정상' && participant.isActive === false),
-              (participant.status === '중지' && participant.isActive === true),
-              // 퇴사일이 있는데 상태가 정상
-              (participant.resignDate && participant.status !== '중지' && participant.status !== '휴먼대상'),
-              // 특정 이름들 (이전에 문제가 있었던 것으로 추정)
-              participant.name?.includes('박은정') || participant.name?.includes('손혜원'),
-              // isActive가 명시적으로 false인 경우
-              participant.isActive === false,
-              // 알려진 문제 기관들
-              participant.institution?.includes('거제') && participant.status !== '중지'
-            ];
-            
-            if (suspiciousConditions.some(condition => condition)) {
-              foundCount++;
-              console.log(`${foundCount}. [잠재적 불일치] ${participant.name} - 기관: ${participant.institution}, 상태: ${participant.status}, isActive: ${participant.isActive}, 퇴사일: ${participant.resignDate || '없음'}`);
-              
-              potentialInconsistencies.push({
-                name: participant.name,
-                id: participant.id,
-                birthDate: participant.birthDate,
-                employeeStatus: '확인필요',
-                participantStatus: participant.status || '정상',
-                employeeInstitution: '모인우리_데이터_없음',
-                participantInstitution: participant.institution,
-                employeeIsActive: null,
-                participantIsActive: participant.isActive,
-                employeeResignDate: '모인우리_데이터_없음',
-                participantResignDate: participant.resignDate || '',
-                jobType: participant.jobType || '미분류',
-                type: '잠재적_불일치_확인필요'
-              });
-            }
-          });
-          
-          console.log(`\n📈 총 ${foundCount}명의 잠재적 불일치 후보 발견 (이전 17명과 비교)`);
-          
-          // 기관별로 그룹화
-          const groupedByInstitution = potentialInconsistencies.reduce((acc, item) => {
-            const institution = item.participantInstitution || '미분류';
-            if (!acc[institution]) {
-              acc[institution] = [];
-            }
-            acc[institution].push(item);
-            return acc;
-          }, {} as Record<string, typeof potentialInconsistencies>);
-          
-          const mockInconsistencies = Object.entries(groupedByInstitution).map(([institution, inconsistencies]) => ({
-            institution,
-            inconsistencies
-          }));
-          
-          const 박은정 = participantData.find(p => p.name?.includes('박은정'));
-          if (박은정) {
-            console.log('\n📋 박은정님 임시 불일치 생성');
-            mockInconsistencies.push({
-              institution: 박은정.institution || '미확인',
-              inconsistencies: [{
-                name: 박은정.name,
-                id: 박은정.id,
-                birthDate: 박은정.birthDate,
-                employeeStatus: '퇴직',
-                participantStatus: 박은정.status || '정상',
-                employeeInstitution: 박은정.institution,
-                participantInstitution: 박은정.institution,
-                employeeIsActive: false,
-                participantIsActive: 박은정.isActive,
-                employeeResignDate: '2024-08-15', // 예시 퇴사일
-                participantResignDate: 박은정.resignDate || '',
-                jobType: 박은정.jobType || '전담사회복지사',
-                type: '종사자데이터_누락_상태'
-              }]
-            });
-          }
-          
-          const 손혜원 = participantData.find(p => p.name?.includes('손혜원'));
-          if (손혜원) {
-            console.log('📋 손혜원님 임시 불일치 생성');
-            mockInconsistencies.push({
-              institution: 손혜원.institution || '미확인',
-              inconsistencies: [{
-                name: 손혜원.name,
-                id: 손혜원.id,
-                birthDate: 손혜원.birthDate,
-                employeeStatus: '퇴직',
-                participantStatus: 손혜원.status || '정상',
-                employeeInstitution: 손혜원.institution,
-                participantInstitution: 손혜원.institution,
-                employeeIsActive: false,
-                participantIsActive: 손혜원.isActive,
-                employeeResignDate: '미확인',
-                participantResignDate: 손혜원.resignDate || '',
-                jobType: 손혜원.jobType || '전담사회복지사',
-                type: '종사자데이터_누락_상태'
-              }]
-            });
-          }
-          
-          return mockInconsistencies.filter(item => item.inconsistencies.length > 0);
+          console.log('📌 정확한 불일치 분석을 위해서는 종사자 데이터 업로드가 필요합니다.');
+          return []; // 임시 데이터를 생성하지 않고 빈 배열 반환
         }
         
         // 생년월일과 이름으로 동일인 매칭 함수 (유연한 매칭)
@@ -1102,10 +995,19 @@ export const useEducationStore = create<EducationStore>()(
               } catch (error) {
                 console.log(`날짜 정규화 실패: ${emp.birthDate} vs ${participant.birthDate}`);
               }
+              
+              // 생년월일이 다르면 동명이인으로 판단하여 매칭하지 않음
+              return false;
             }
             
-            // 생년월일이 없으면 이름만으로 매칭
-            return nameMatch;
+            // 둘 다 생년월일이 없는 경우에만 이름만으로 매칭 (경고 메시지 출력)
+            if (!participant.birthDate && !emp.birthDate) {
+              console.warn(`⚠️ 생년월일 없이 이름만으로 매칭: ${participant.name}`);
+              return nameMatch;
+            }
+            
+            // 한쪽만 생년월일이 있는 경우 매칭하지 않음 (데이터 불완전)
+            return false;
           }) || null;
         };
         
@@ -1131,7 +1033,7 @@ export const useEducationStore = create<EducationStore>()(
               console.log('- 모인우리 상태:', matchingEmployee.isActive ? '재직' : '퇴직', '/ 퇴사일:', matchingEmployee.resignDate);
               
               // 상태 불일치 검사 (더 세밀한 분석)
-              const participantActive = participant.status !== '중지' && participant.status !== '휴먼대상' && participant.isActive !== false;
+              const participantActive = participant.status !== '중지' && participant.status !== '휴면대상' && participant.status !== '탈퇴' && participant.isActive !== false;
               
               // 종사자 데이터에서 퇴직 여부 판별
               let employeeActive = matchingEmployee.isActive;
@@ -1145,32 +1047,207 @@ export const useEducationStore = create<EducationStore>()(
                 }
               }
               
+              // 휴면대상, 중지, 탈퇴와 퇴직을 동등하게 처리 (상태 일치로 간주)
+              const isBothInactive = 
+                (participant.status === '휴면대상' && !employeeActive) ||
+                (participant.status === '중지' && !employeeActive) ||
+                (participant.status === '탈퇴' && !employeeActive);
+              
+              // 퇴사일 비교 함수 (10일 이상 차이나면 불일치)
+              const isResignDateMismatch = () => {
+                const participantDate = participant.resignDate?.trim();
+                const employeeDate = matchingEmployee.resignDate?.trim();
+                
+                // 한쪽이 공란이면 불일치
+                if ((participantDate && !employeeDate) || (!participantDate && employeeDate)) {
+                  return true;
+                }
+                
+                // 둘 다 공란이면 일치
+                if (!participantDate && !employeeDate) {
+                  return false;
+                }
+                
+                // 둘 다 있으면 날짜 차이 계산
+                if (participantDate && employeeDate) {
+                  try {
+                    const date1 = new Date(participantDate);
+                    const date2 = new Date(employeeDate);
+                    const diffTime = Math.abs(date1.getTime() - date2.getTime());
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    return diffDays > 10; // 10일 이상 차이나면 불일치
+                  } catch {
+                    return participantDate !== employeeDate; // 날짜 파싱 실패시 문자열 비교
+                  }
+                }
+                
+                return false;
+              };
+              
+              // 추가 불일치 검사 함수들
+              const checkInstitutionMismatch = () => {
+                // 경남광역은 광역 관리기관이므로 개별 기관과의 차이를 불일치로 보지 않음
+                const participantInst = participant.institution?.trim();
+                const employeeInst = matchingEmployee.institution?.trim();
+                
+                if (!participantInst || !employeeInst) return false;
+                
+                // 경남광역과 개별 기관 간의 차이는 정상으로 처리
+                if (participantInst === '경남광역' || employeeInst === '경남광역') {
+                  return false; // 일치로 처리
+                }
+                
+                return participantInst !== employeeInst;
+              };
+              
+              const checkHireDateMismatch = () => {
+                const participantHireDate = participant.hireDate?.trim();
+                const employeeHireDate = matchingEmployee.hireDate?.trim();
+                
+                if (!participantHireDate || !employeeHireDate) return false;
+                
+                try {
+                  const date1 = new Date(participantHireDate);
+                  const date2 = new Date(employeeHireDate);
+                  const diffTime = Math.abs(date1.getTime() - date2.getTime());
+                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  return diffDays > 90; // 90일 이상 차이나면 불일치
+                } catch {
+                  return participantHireDate !== employeeHireDate;
+                }
+              };
+              
+              const checkJobTypeMismatch = () => {
+                return participant.jobType && matchingEmployee.jobType && 
+                       participant.jobType !== matchingEmployee.jobType;
+              };
+              
+              const checkStatusContradiction = () => {
+                // 퇴사일은 있는데 상태가 정상인 경우
+                const hasResignDateButActive = participant.resignDate && participant.status === '정상';
+                // 퇴사일이 미래인 경우
+                const futurResignDate = participant.resignDate && new Date(participant.resignDate) > new Date();
+                
+                return hasResignDateButActive || futurResignDate;
+              };
+              
+              // 불일치 유형 분류
+              const inconsistencyTypes = [];
+              
+              if (!isBothInactive && (participantActive !== employeeActive)) {
+                inconsistencyTypes.push('재직상태_불일치');
+              }
+              
+              if (isResignDateMismatch()) {
+                inconsistencyTypes.push('퇴사일_불일치');
+              }
+              
+              if (checkInstitutionMismatch()) {
+                inconsistencyTypes.push('소속기관_불일치');
+              }
+              
+              if (checkHireDateMismatch()) {
+                inconsistencyTypes.push('입사일_불일치');
+              }
+              
+              if (checkJobTypeMismatch()) {
+                inconsistencyTypes.push('직군_불일치');
+              }
+              
+              if (checkStatusContradiction()) {
+                inconsistencyTypes.push('상태모순_불일치');
+              }
+              
               // 불일치 발견 조건을 더 넓게 설정
               const hasInconsistency = 
-                participantActive !== employeeActive || // 재직 상태 불일치
-                (participant.resignDate !== matchingEmployee.resignDate) || // 퇴사일 불일치
-                (Boolean(participant.resignDate) !== Boolean(matchingEmployee.resignDate)); // 퇴사일 유무 불일치
+                !isBothInactive && (
+                  inconsistencyTypes.length > 0
+                );
               
-              if (hasInconsistency) {
+              if (isBothInactive) {
+                console.log(`✅ [${participant.name}] 상태 일치 (배움터: '${participant.status}' ↔ 모인우리: '퇴직')`);
+              } else if (hasInconsistency) {
                 console.log(`⚠️ [${participant.name}] 상태 불일치 발견!`);
                 console.log(`  - 배움터 재직상태: ${participantActive} (status: ${participant.status}, isActive: ${participant.isActive})`);
                 console.log(`  - 모인우리 재직상태: ${employeeActive} (isActive: ${matchingEmployee.isActive}, 퇴사일: ${matchingEmployee.resignDate})`);
+                console.log(`  - 배움터 퇴사일: ${participant.resignDate || '(없음)'}`);
+                console.log(`  - 모인우리 퇴사일: ${matchingEmployee.resignDate || '(없음)'}`);
                 
-                inconsistencies.push({
+                // 퇴사일 차이 계산해서 로그 출력
+                if (participant.resignDate && matchingEmployee.resignDate) {
+                  try {
+                    const date1 = new Date(participant.resignDate);
+                    const date2 = new Date(matchingEmployee.resignDate);
+                    const diffTime = Math.abs(date1.getTime() - date2.getTime());
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    console.log(`  - 퇴사일 차이: ${diffDays}일 (기준: 10일 이상시 불일치)`);
+                  } catch {
+                    console.log(`  - 퇴사일 형식 오류로 문자열 비교`);
+                  }
+                }
+                
+                // 상세 불일치 정보 수집
+                const detailedInfo = {
+                  // 기본 정보
                   name: participant.name,
                   id: participant.id,
                   birthDate: participant.birthDate,
+                  
+                  // 불일치 유형
+                  inconsistencyTypes: inconsistencyTypes,
+                  inconsistencyCount: inconsistencyTypes.length,
+                  
+                  // 상태 정보 (기존)
                   employeeStatus: employeeActive ? '재직' : '퇴직',
                   participantStatus: participant.status || '정상',
-                  employeeInstitution: matchingEmployee.institution,
-                  participantInstitution: participant.institution,
                   employeeIsActive: matchingEmployee.isActive,
                   participantIsActive: participant.isActive,
+                  
+                  // 퇴사일 정보 (기존)
                   employeeResignDate: matchingEmployee.resignDate || '',
                   participantResignDate: participant.resignDate || '',
+                  
+                  // 추가 상세 정보
+                  employeeInstitution: matchingEmployee.institution || '',
+                  participantInstitution: participant.institution || '',
+                  employeeHireDate: matchingEmployee.hireDate || '',
+                  participantHireDate: participant.hireDate || '',
+                  employeeJobType: matchingEmployee.jobType || '',
+                  participantJobType: participant.jobType || '',
+                  employeePhone: matchingEmployee.phone || '',
+                  participantPhone: participant.phone || '',
+                  
+                  // 계산된 차이값들
+                  hireDateDiff: (() => {
+                    if (!participant.hireDate || !matchingEmployee.hireDate) return null;
+                    try {
+                      const date1 = new Date(participant.hireDate);
+                      const date2 = new Date(matchingEmployee.hireDate);
+                      const diffTime = Math.abs(date1.getTime() - date2.getTime());
+                      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    } catch {
+                      return null;
+                    }
+                  })(),
+                  
+                  resignDateDiff: (() => {
+                    if (!participant.resignDate || !matchingEmployee.resignDate) return null;
+                    try {
+                      const date1 = new Date(participant.resignDate);
+                      const date2 = new Date(matchingEmployee.resignDate);
+                      const diffTime = Math.abs(date1.getTime() - date2.getTime());
+                      return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                    } catch {
+                      return null;
+                    }
+                  })(),
+                  
+                  // 호환성을 위한 기존 필드
                   jobType: participant.jobType || matchingEmployee.jobType,
-                  type: hasInconsistency ? '상태_불일치' : '정상'
-                });
+                  type: inconsistencyTypes.join(', ') || '상태_불일치'
+                };
+                
+                inconsistencies.push(detailedInfo);
               }
               
               // 박은정 특별 체크

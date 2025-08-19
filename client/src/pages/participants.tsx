@@ -33,7 +33,6 @@ export default function ParticipantsPage() {
   const [activeTab, setActiveTab] = useState('upload');
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<EducationCompletionStatus | 'all'>('all');
@@ -41,7 +40,24 @@ export default function ParticipantsPage() {
   const [activeStatusFilter, setActiveStatusFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [inconsistencySearchTerm, setInconsistencySearchTerm] = useState('');
+  const [selectedInconsistency, setSelectedInconsistency] = useState<any>(null);
   const { toast } = useToast();
+  
+  // 검색어 하이라이트 함수
+  const highlightText = (text: string | undefined, searchTerm: string) => {
+    if (!text || !searchTerm) return text;
+    
+    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+    
+    return parts.map((part, index) => 
+      regex.test(part) ? (
+        <mark key={index} className="bg-yellow-200 px-1 rounded">{part}</mark>
+      ) : part
+    );
+  };
+
   const { 
     participantData, 
     setParticipantData, 
@@ -50,7 +66,9 @@ export default function ParticipantsPage() {
     getEducationSummaryStats,
     getDataInconsistencies,
     loadLazyData,
-    isLoaded
+    isLoaded,
+    employeeData,
+    setEmployeeData
   } = useEducationData();
 
   // 검색어 debounce 처리
@@ -69,6 +87,14 @@ export default function ParticipantsPage() {
       loadLazyData('participant');
     }
   }, [isLoaded?.participant]); // loadLazyData 제거
+
+  // 데이터 불일치 분석 탭 접근 시 종사자 데이터 로드
+  useEffect(() => {
+    if (activeTab === 'inconsistencies' && !isLoaded?.employee) {
+      console.log('🔄 Loading employee data for inconsistency analysis...');
+      loadLazyData('employee');
+    }
+  }, [activeTab, isLoaded?.employee]);
 
   // API 호출 비활성화 - IndexedDB 데이터만 사용
   // useEffect(() => {
@@ -103,16 +129,6 @@ export default function ParticipantsPage() {
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
-      toast({
-        title: "파일 선택됨",
-        description: `${file.name}이 선택되었습니다.`,
-      });
-    }
-  };
 
   const handleClearData = async () => {
     if (!window.confirm('모든 소속 회원 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
@@ -222,78 +238,6 @@ export default function ParticipantsPage() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!uploadedFile) {
-      toast({
-        title: "파일을 선택해주세요",
-        description: "업로드할 소속 회원 데이터 파일을 선택해주세요.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', uploadedFile);
-      formData.append('type', 'participants');
-
-      const response = await fetch('/api/participants/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('파일 업로드에 실패했습니다.');
-      }
-
-      const result = await response.json();
-      
-      toast({
-        title: "업로드 완료",
-        description: `${result.count}개의 소속 회원 데이터가 성공적으로 업로드되었습니다.`,
-      });
-      
-      // 파일 선택 초기화
-      setUploadedFile(null);
-      const fileInput = document.getElementById('participant-file') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-      
-      // 업로드된 데이터를 서버에서 가져와서 IndexedDB에 자동 동기화
-      await fetchParticipantData();
-      
-      // 🔥 중요: 서버에서 데이터를 다시 가져와서 IndexedDB에 저장
-      try {
-        const { IndexedDBStorage } = await import('@/lib/indexeddb');
-        const educationDB = new IndexedDBStorage();
-        const serverResponse = await fetch('/api/participants');
-        if (serverResponse.ok) {
-          const allParticipantData = await serverResponse.json();
-          
-          console.log(`💾 서버에서 ${allParticipantData.length}명 참가자 데이터를 IndexedDB에 동기화`);
-          await educationDB.setItem('participantData', allParticipantData);
-          
-          // 스토어도 업데이트
-          setParticipantData(allParticipantData);
-        }
-      } catch (syncError) {
-        console.error('IndexedDB 동기화 실패:', syncError);
-      }
-      
-      // 목록 탭으로 이동
-      setActiveTab('list');
-      
-    } catch (error) {
-      toast({
-        title: "업로드 실패",
-        description: error instanceof Error ? error.message : "파일 업로드 중 오류가 발생했습니다.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   // 교육 상태에 따른 컬러 코딩
   const getStatusBadge = (status: EducationCompletionStatus) => {
@@ -456,66 +400,17 @@ export default function ParticipantsPage() {
           
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5 text-blue-600" />
-                소속 회원 데이터 업로드
-              </CardTitle>
-              <CardDescription>
-                Excel 파일을 통해 소속 회원의 상세 정보를 일괄 업로드합니다
-              </CardDescription>
+              <CardTitle className="text-lg">데이터 관리</CardTitle>
+              <CardDescription>소속 회원 데이터를 관리합니다</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <Alert>
-                <Eye className="h-4 w-4" />
-                <AlertDescription>
-                  <div className="space-y-2">
-                    <p className="font-semibold">소속 회원 업로드 파일은 다음 헤더를 포함해야 합니다:</p>
-                    <ul className="text-sm list-disc ml-4 space-y-1">
-                      <li>번호, 소속, 기관코드, 유형, 회원명, 성별, 생년월일</li>
-                      <li>ID, 휴대전화, 이메일, 수강건수, 접속일, 가입일</li>
-                      <li>직군, 입사일, 퇴사일, 특화, 중간관리자, 최고관리자</li>
-                      <li>경력, 시법사업참여여부, 이메일수신동의여부, SMS수신동의 여부</li>
-                      <li>상태, 최종수료, 기초직무, 심화교육</li>
-                    </ul>
-                  </div>
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-2">
-                <Label htmlFor="participant-file">파일 선택</Label>
-                <Input
-                  id="participant-file"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                />
-              </div>
-
-              {uploadedFile && (
-                <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                  <Eye className="h-4 w-4" />
-                  <span className="text-sm">{uploadedFile.name}</span>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <Button 
-                  onClick={handleUpload} 
-                  disabled={!uploadedFile || isUploading}
-                  className="flex-1"
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  {isUploading ? '업로드 중...' : '업로드'}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleClearData}
-                  disabled={isLoading || !participantData || participantData.length === 0}
-                >
-                  데이터 초기화
-                </Button>
-              </div>
+            <CardContent>
+              <Button
+                variant="destructive"
+                onClick={handleClearData}
+                disabled={isLoading || !participantData || participantData.length === 0}
+              >
+                데이터 초기화
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -819,9 +714,21 @@ export default function ParticipantsPage() {
                 데이터 불일치 분석
               </CardTitle>
               <CardDescription>
-                종사자 관리(모인우리) 데이터와 소속 회원(배움터) 데이터 간의 상태 불일치를 분석합니다.
-                <br />
-                <strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.
+                <div className="space-y-2">
+                  <div>종사자 관리(모인우리) 데이터와 소속 회원(배움터) 데이터 간의 상태 불일치를 분석합니다.</div>
+                  <div><strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.</div>
+                  
+                  <div className="bg-blue-50 p-3 rounded-md mt-3">
+                    <h4 className="font-semibold text-blue-800 mb-2">📋 상태 일치 기준</h4>
+                    <ul className="text-sm text-blue-700 space-y-1">
+                      <li><strong>재직 상태 일치:</strong> 배움터 "정상" ↔ 모인우리 "재직"</li>
+                      <li><strong>퇴직 상태 일치:</strong> 배움터 "휴면대상", "중지", "탈퇴" ↔ 모인우리 "퇴직"</li>
+                      <li><strong>퇴사일 일치:</strong> 양쪽 모두 동일한 날짜 또는 10일 이내 차이</li>
+                      <li><strong>퇴사일 불일치:</strong> 한쪽만 퇴사일 있음, 또는 10일 이상 차이</li>
+                      <li><strong>불일치 예시:</strong> 배움터 "정상" ↔ 모인우리 "퇴직"</li>
+                    </ul>
+                  </div>
+                </div>
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -864,18 +771,85 @@ export default function ParticipantsPage() {
                     </Card>
                   </div>
 
+                  {/* 검색 기능 */}
+                  <div className="flex items-center gap-4 p-4 bg-muted/30 rounded-lg">
+                    <div className="flex-1">
+                      <Input
+                        placeholder="이름, 기관명, 직군으로 검색..."
+                        value={inconsistencySearchTerm}
+                        onChange={(e) => setInconsistencySearchTerm(e.target.value)}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {inconsistencySearchTerm ? (() => {
+                        const filteredInstitutions = dataInconsistencies.filter(inst => {
+                          const searchLower = inconsistencySearchTerm.toLowerCase();
+                          return (
+                            inst.institution.toLowerCase().includes(searchLower) ||
+                            inst.inconsistencies.some(inc => 
+                              inc.name.toLowerCase().includes(searchLower) ||
+                              inc.jobType?.toLowerCase().includes(searchLower)
+                            )
+                          );
+                        });
+                        const totalFilteredInconsistencies = filteredInstitutions.reduce((sum, inst) => {
+                          return sum + inst.inconsistencies.filter(inc => {
+                            const searchLower = inconsistencySearchTerm.toLowerCase();
+                            return (
+                              inc.name.toLowerCase().includes(searchLower) ||
+                              inc.jobType?.toLowerCase().includes(searchLower)
+                            );
+                          }).length;
+                        }, 0);
+                        return `검색 결과: ${filteredInstitutions.length}개 기관, ${totalFilteredInconsistencies}건 불일치`;
+                      })() :
+                        `전체: ${dataInconsistencies.length}개 기관, ${dataInconsistencies.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건 불일치`
+                      }
+                    </div>
+                  </div>
+
                   {/* 기관별 불일치 리스트 */}
-                  {dataInconsistencies.map((institutionData, instIndex) => (
+                  {dataInconsistencies
+                    .filter(inst => {
+                      if (!inconsistencySearchTerm) return true;
+                      const searchLower = inconsistencySearchTerm.toLowerCase();
+                      return (
+                        inst.institution.toLowerCase().includes(searchLower) ||
+                        inst.inconsistencies.some(inc => 
+                          inc.name.toLowerCase().includes(searchLower) ||
+                          inc.jobType?.toLowerCase().includes(searchLower)
+                        )
+                      );
+                    })
+                    .map((institutionData, instIndex) => (
                     <Card key={instIndex} className="border-l-4 border-l-orange-400">
                       <CardHeader>
                         <CardTitle className="text-lg flex items-center justify-between">
-                          <span>{institutionData.institution}</span>
+                          <span>{highlightText(institutionData.institution, inconsistencySearchTerm)}</span>
                           <Badge variant="destructive" className="ml-2">
-                            {institutionData.inconsistencies.length}건 불일치
+                            {inconsistencySearchTerm ? 
+                              institutionData.inconsistencies.filter(inc => {
+                                const searchLower = inconsistencySearchTerm.toLowerCase();
+                                return (
+                                  inc.name.toLowerCase().includes(searchLower) ||
+                                  inc.jobType?.toLowerCase().includes(searchLower)
+                                );
+                              }).length :
+                              institutionData.inconsistencies.length
+                            }건 불일치
                           </Badge>
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
+                        <div className="mb-4 p-3 bg-gray-50 rounded-md">
+                          <div className="text-sm text-gray-700 space-y-1">
+                            <div><strong>필터링 기준:</strong></div>
+                            <div>• 배움터 "휴면대상"/"중지"/"탈퇴" ↔ 모인우리 "퇴직" = <span className="text-green-600 font-semibold">정상 일치</span></div>
+                            <div>• 퇴사일 10일 이내 차이 = <span className="text-green-600 font-semibold">정상 일치</span></div>
+                            <div>• 위 조건들은 아래 불일치 목록에서 <strong>제외</strong>됩니다</div>
+                          </div>
+                        </div>
                         <div className="overflow-x-auto">
                           <Table className="w-full">
                             <TableHeader>
@@ -889,19 +863,29 @@ export default function ParticipantsPage() {
                                 <TableHead className="w-32">종사자 퇴사일</TableHead>
                                 <TableHead className="w-32">소속회원 퇴사일</TableHead>
                                 <TableHead className="w-32">불일치 유형</TableHead>
+                                <TableHead className="w-24">상세보기</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {institutionData.inconsistencies.map((inconsistency, idx) => (
+                              {institutionData.inconsistencies
+                                .filter(inconsistency => {
+                                  if (!inconsistencySearchTerm) return true;
+                                  const searchLower = inconsistencySearchTerm.toLowerCase();
+                                  return (
+                                    inconsistency.name.toLowerCase().includes(searchLower) ||
+                                    inconsistency.jobType?.toLowerCase().includes(searchLower)
+                                  );
+                                })
+                                .map((inconsistency, idx) => (
                                 <TableRow key={idx} className="hover:bg-muted/50">
                                   <TableCell className="font-medium">
-                                    {inconsistency.name}
+                                    {highlightText(inconsistency.name, inconsistencySearchTerm)}
                                   </TableCell>
                                   <TableCell className="font-mono text-xs">{inconsistency.birthDate || '-'}</TableCell>
-                                  <TableCell className="font-mono text-xs">{inconsistency.id}</TableCell>
+                                  <TableCell className="font-mono text-xs">{highlightText(inconsistency.id, inconsistencySearchTerm)}</TableCell>
                                   <TableCell>
                                     <Badge variant="outline" className="text-xs">
-                                      {inconsistency.jobType || '미분류'}
+                                      {highlightText(inconsistency.jobType || '미분류', inconsistencySearchTerm)}
                                     </Badge>
                                   </TableCell>
                                   <TableCell className="bg-red-50">
@@ -920,6 +904,14 @@ export default function ParticipantsPage() {
                                     <Badge variant="outline" className="text-xs">
                                       {inconsistency.type?.replace(/_/g, ' ')}
                                     </Badge>
+                                  </TableCell>
+                                  <TableCell>
+                                    <button 
+                                      onClick={() => setSelectedInconsistency(inconsistency)}
+                                      className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded border"
+                                    >
+                                      상세보기
+                                    </button>
                                   </TableCell>
                                 </TableRow>
                               ))}
@@ -963,6 +955,133 @@ export default function ParticipantsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      
+      {/* 불일치 상세 정보 모달 */}
+      {selectedInconsistency && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setSelectedInconsistency(null)}>
+          <div className="bg-white rounded-lg p-6 max-w-4xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">불일치 상세 정보 - {selectedInconsistency.name}</h3>
+              <button 
+                onClick={() => setSelectedInconsistency(null)}
+                className="text-gray-500 hover:text-gray-700 text-xl"
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* 기본 정보 */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 border-b pb-2">기본 정보</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="font-medium">성명:</span><span>{selectedInconsistency.name}</span></div>
+                  <div className="flex justify-between"><span className="font-medium">생년월일:</span><span>{selectedInconsistency.birthDate || '-'}</span></div>
+                  <div className="flex justify-between"><span className="font-medium">ID:</span><span className="font-mono">{selectedInconsistency.id || '-'}</span></div>
+                </div>
+              </div>
+              
+              {/* 불일치 유형 */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 border-b pb-2">불일치 유형 ({selectedInconsistency.inconsistencyCount || 0}개)</h4>
+                <div className="flex flex-wrap gap-2">
+                  {selectedInconsistency.inconsistencyTypes?.map((type: string, idx: number) => (
+                    <Badge key={idx} variant="destructive" className="text-xs">
+                      {type.replace(/_/g, ' ')}
+                    </Badge>
+                  )) || <span className="text-gray-500 text-sm">정보 없음</span>}
+                </div>
+              </div>
+              
+              {/* 상태 비교 */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 border-b pb-2">재직 상태 비교</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="bg-red-50 p-2 rounded">
+                    <div className="font-medium text-red-800">모인우리 (종사자관리)</div>
+                    <div>상태: <Badge variant={selectedInconsistency.employeeStatus === '퇴직' ? 'destructive' : 'default'} className="text-xs ml-1">{selectedInconsistency.employeeStatus}</Badge></div>
+                    <div>퇴사일: {selectedInconsistency.employeeResignDate || '없음'}</div>
+                  </div>
+                  <div className="bg-blue-50 p-2 rounded">
+                    <div className="font-medium text-blue-800">배움터 (소속회원)</div>
+                    <div>상태: <Badge variant={selectedInconsistency.participantStatus === '정상' ? 'default' : 'secondary'} className="text-xs ml-1">{selectedInconsistency.participantStatus}</Badge></div>
+                    <div>퇴사일: {selectedInconsistency.participantResignDate || '없음'}</div>
+                  </div>
+                  {selectedInconsistency.resignDateDiff && (
+                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                      퇴사일 차이: {selectedInconsistency.resignDateDiff}일
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* 소속/직군 비교 */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 border-b pb-2">소속/직군 비교</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="bg-red-50 p-2 rounded">
+                    <div className="font-medium text-red-800">모인우리</div>
+                    <div>소속: {selectedInconsistency.employeeInstitution || '정보없음'}</div>
+                    <div>직군: {selectedInconsistency.employeeJobType || '정보없음'}</div>
+                  </div>
+                  <div className="bg-blue-50 p-2 rounded">
+                    <div className="font-medium text-blue-800">배움터</div>
+                    <div>소속: {selectedInconsistency.participantInstitution || '정보없음'}</div>
+                    <div>직군: {selectedInconsistency.participantJobType || '정보없음'}</div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* 입사일 비교 */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 border-b pb-2">입사일 비교</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="bg-red-50 p-2 rounded">
+                    <div className="font-medium text-red-800">모인우리 입사일</div>
+                    <div>{selectedInconsistency.employeeHireDate || '정보없음'}</div>
+                  </div>
+                  <div className="bg-blue-50 p-2 rounded">
+                    <div className="font-medium text-blue-800">배움터 입사일</div>
+                    <div>{selectedInconsistency.participantHireDate || '정보없음'}</div>
+                  </div>
+                  {selectedInconsistency.hireDateDiff && (
+                    <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                      입사일 차이: {selectedInconsistency.hireDateDiff}일
+                      {selectedInconsistency.hireDateDiff > 90 && (
+                        <span className="text-red-600 ml-2">(재입사 의심)</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              {/* 연락처 비교 */}
+              <div className="space-y-4">
+                <h4 className="font-semibold text-gray-800 border-b pb-2">연락처 비교</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="bg-red-50 p-2 rounded">
+                    <div className="font-medium text-red-800">모인우리 연락처</div>
+                    <div>{selectedInconsistency.employeePhone || '정보없음'}</div>
+                  </div>
+                  <div className="bg-blue-50 p-2 rounded">
+                    <div className="font-medium text-blue-800">배움터 연락처</div>
+                    <div>{selectedInconsistency.participantPhone || '정보없음'}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="mt-6 text-center">
+              <button 
+                onClick={() => setSelectedInconsistency(null)}
+                className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

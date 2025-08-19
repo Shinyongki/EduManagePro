@@ -31,7 +31,6 @@ export default function InstitutionDataPage() {
   const [activeTab, setActiveTab] = useState('upload');
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
@@ -72,16 +71,6 @@ export default function InstitutionDataPage() {
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
-      toast({
-        title: "파일 선택됨",
-        description: `${file.name}이 선택되었습니다.`,
-      });
-    }
-  };
 
   // 날짜별 업로드 함수
   const handleDateUpload = async (date: string, description: string, file: File) => {
@@ -339,69 +328,6 @@ export default function InstitutionDataPage() {
     }
   };
 
-  const handleUpload = async () => {
-    if (!uploadedFile) {
-      toast({
-        title: "파일을 선택해주세요",
-        description: "업로드할 기관 현황 데이터 파일을 선택해주세요.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsUploading(true);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', uploadedFile);
-
-      const response = await fetch('/api/institutions/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('파일 업로드에 실패했습니다.');
-      }
-
-      const result = await response.json();
-      
-      toast({
-        title: "업로드 완료",
-        description: `${result.count}개의 기관 데이터가 성공적으로 업로드되었습니다.`,
-      });
-      
-      // 파일 선택 초기화
-      setUploadedFile(null);
-      const fileInput = document.getElementById('institution-file') as HTMLInputElement;
-      if (fileInput) fileInput.value = '';
-      
-      // 서버에서 IndexedDB로 자동 동기화
-      console.log('🔄 서버 → IndexedDB 자동 동기화 시작...');
-      const syncResponse = await fetch('/api/institutions');
-      if (syncResponse.ok) {
-        const syncData = await syncResponse.json();
-        const { IndexedDBStorage } = await import('@/lib/indexeddb');
-        const educationDB = new IndexedDBStorage();
-        await educationDB.setItem('institutionData', syncData);
-        setInstitutionData(syncData);
-        console.log(`✅ IndexedDB 동기화 완료: ${syncData.length}개 기관 데이터`);
-      }
-      
-      // 목록 탭으로 이동하고 첫 페이지로 리셋
-      setActiveTab('list');
-      setCurrentPage(1);
-      
-    } catch (error) {
-      toast({
-        title: "업로드 실패",
-        description: error instanceof Error ? error.message : "파일 업로드 중 오류가 발생했습니다.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  };
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -438,57 +364,17 @@ export default function InstitutionDataPage() {
           
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Building className="h-5 w-5" />
-                기관 현황 데이터 업로드
-              </CardTitle>
-              <CardDescription>
-                Excel 파일을 통해 기관별 배치 현황을 일괄 업로드합니다
-              </CardDescription>
+              <CardTitle className="text-lg">데이터 관리</CardTitle>
+              <CardDescription>기관 현황 데이터를 관리합니다</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <Alert>
-                <Eye className="h-4 w-4" />
-                <AlertDescription>
-                  업로드 파일은 다음 헤더를 포함해야 합니다: 기관코드, 기관명, 지역, 유형, 배치정원(사회복지사), 배치정원(생활지원사), 예산정원(사회복지사), 예산정원(생활지원사), 실제배치(사회복지사), 실제배치(생활지원사) 등
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-2">
-                <Label htmlFor="institution-file">파일 선택</Label>
-                <Input
-                  id="institution-file"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                />
-              </div>
-
-              {uploadedFile && (
-                <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                  <Eye className="h-4 w-4" />
-                  <span className="text-sm">{uploadedFile.name}</span>
-                </div>
-              )}
-
-              <div className="flex gap-2">
-                <Button 
-                  onClick={handleUpload} 
-                  disabled={!uploadedFile || isUploading}
-                  className="flex-1"
-                >
-                  <Upload className="h-4 w-4 mr-2" />
-                  {isUploading ? '업로드 중...' : '업로드'}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleClearData}
-                  disabled={isLoading || !institutionData || institutionData.length === 0}
-                >
-                  데이터 초기화
-                </Button>
-              </div>
+            <CardContent>
+              <Button
+                variant="destructive"
+                onClick={handleClearData}
+                disabled={isLoading || !institutionData || institutionData.length === 0}
+              >
+                데이터 초기화
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

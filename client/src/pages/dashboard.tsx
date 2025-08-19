@@ -320,11 +320,14 @@ export default function Dashboard() {
   // Calculate key metrics
   const keyMetrics = useMemo(() => {
     const totalInstitutions = analysisData.length;
-    const totalWorkers = analysisData.reduce((sum, item) => sum + item.backup1_total, 0);
+    const totalWorkers = analysisData.reduce((sum, item) => sum + (item.backup1_total || 0), 0);
     const avgEducationRate = totalInstitutions > 0 
-      ? (analysisData.reduce((sum, item) => sum + item.education_rate_fb, 0) / totalInstitutions)
+      ? (analysisData.reduce((sum, item) => sum + (item.education_rate_total || 0), 0) / totalInstitutions)
       : 0;
-    const warningCount = analysisData.reduce((sum, item) => sum + item.education_warning, 0);
+    const warningCount = analysisData.reduce((sum, item) => {
+      // 이수율이 70% 미만인 기관을 경고 대상으로 분류
+      return sum + ((item.education_rate_total || 0) < 70 ? 1 : 0);
+    }, 0);
     
     return {
       totalInstitutions,
@@ -357,7 +360,7 @@ export default function Dashboard() {
         if (!acc[district]) {
           acc[district] = { total: 0, count: 0 };
         }
-        acc[district].total += item.education_rate_fb;
+        acc[district].total += (item.education_rate_total || 0);
         acc[district].count += 1;
         return acc;
       }, {} as Record<string, { total: number; count: number }>);
@@ -499,6 +502,47 @@ export default function Dashboard() {
           <CardContent>
             <div className="text-3xl font-bold text-blue-600">{keyMetrics.totalInstitutions}</div>
             <p className="text-xs text-muted-foreground mt-1">분석 대상 기관</p>
+            
+            {/* 임시 디버그: 광역지원기관 상세 정보 */}
+            <div className="mt-2 text-xs text-red-600">
+              {(() => {
+                const gwangyeok = analysisData.find(item => item.institutionCode === 'A48000002');
+                if (!gwangyeok) return <div>광역지원기관 미발견</div>;
+                
+                // 참가자 데이터에서 해당 기관 검색 (정확한 기관명만)
+                const gwangyeokParticipants = participantData.filter(p => 
+                  p.institutionCode === 'A48000002' || 
+                  p.institution === '(광역)(재)경상남도사회서비스원'
+                );
+                
+                // 교육 완료자 검색
+                const basicCompleted = gwangyeokParticipants.filter(p => 
+                  p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료'
+                );
+                const advancedCompleted = gwangyeokParticipants.filter(p => 
+                  p.advancedEducation === '완료' || p.advancedEducation === '수료'
+                );
+                const finalCompleted = gwangyeokParticipants.filter(p => {
+                  const hasBasic = p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료';
+                  const hasAdvanced = p.advancedEducation === '완료' || p.advancedEducation === '수료';
+                  return hasBasic && hasAdvanced;
+                });
+                
+                return (
+                  <div>
+                    <div>광역지원기관: {gwangyeok.institutionName}</div>
+                    <div>전체 참가자: {gwangyeokParticipants.length}명</div>
+                    <div>기초교육 완료: {basicCompleted.length}명</div>
+                    <div>심화교육 완료: {advancedCompleted.length}명</div>
+                    <div>최종 이수인원: {finalCompleted.length}명</div>
+                    <div>시스템 계산 결과: {gwangyeok.education_completed_total}명</div>
+                    {gwangyeokParticipants.length > 0 && (
+                      <div>참가자 기관명: {[...new Set(gwangyeokParticipants.map(p => p.institution))].join(', ')}</div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           </CardContent>
         </Card>
 

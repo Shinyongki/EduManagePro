@@ -20,6 +20,7 @@ export default function EducationStatsPage() {
   const { employeeData } = useEmployeeStore();
 
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedInstitution, setSelectedInstitution] = useState<string | null>(null);
 
   useEffect(() => {
     // 페이지가 로드될 때마다 새로고침
@@ -29,6 +30,57 @@ export default function EducationStatsPage() {
   const educationStats = getEducationStats();
   const summaryStats = getEducationSummaryStats();
   const participantStatuses = getParticipantEducationStatus();
+  
+  // 기관별 직원 상세 정보 가져오기
+  const getInstitutionEmployeeDetails = (institutionName: string) => {
+    // 해당 기관의 참가자 데이터 필터링
+    const institutionParticipants = participantData.filter(p => 
+      p.institution === institutionName ||
+      p.institution?.includes(institutionName) ||
+      institutionName?.includes(p.institution)
+    );
+    
+    // 해당 기관의 종사자 데이터 필터링
+    const institutionEmployees = employeeData.filter(emp => 
+      emp.institution === institutionName ||
+      emp.institution?.includes(institutionName) ||
+      institutionName?.includes(emp.institution)
+    );
+    
+    // 각 직원의 교육 이수 현황 매칭
+    return institutionEmployees.map(employee => {
+      const participantMatch = institutionParticipants.find(p => 
+        p.name === employee.name || 
+        (p.residentId && employee.residentId && p.residentId === employee.residentId)
+      );
+      
+      let basicEducationStatus = '미이수';
+      let advancedEducationStatus = '미이수';
+      
+      if (participantMatch) {
+        // 기초교육 상태
+        if (participantMatch.basicTraining === '완료' || participantMatch.basicTraining === '수료' || participantMatch.finalCompletion === '수료') {
+          basicEducationStatus = '수료';
+        } else if (participantMatch.basicTraining && participantMatch.basicTraining !== '미이수') {
+          basicEducationStatus = participantMatch.basicTraining;
+        }
+        
+        // 심화교육 상태
+        if (participantMatch.advancedEducation === '완료' || participantMatch.advancedEducation === '수료') {
+          advancedEducationStatus = '수료';
+        } else if (participantMatch.advancedEducation && participantMatch.advancedEducation !== '미이수') {
+          advancedEducationStatus = participantMatch.advancedEducation;
+        }
+      }
+      
+      return {
+        ...employee,
+        basicEducationStatus,
+        advancedEducationStatus,
+        isFullyCompleted: basicEducationStatus === '수료' && advancedEducationStatus === '수료'
+      };
+    });
+  };
 
   // 직군별 통계 계산 (중복 제거)
   const getJobTypeStats = (educationType: 'basic' | 'advanced') => {
@@ -778,12 +830,19 @@ export default function EducationStatsPage() {
                 <CardContent>
                   <div className="space-y-3 max-h-96 overflow-y-auto">
                     {excellentInstitutions.map((inst, index) => (
-                      <div key={index} className="border border-green-200 rounded-lg p-3 bg-green-50">
+                      <div 
+                        key={index} 
+                        className="border border-green-200 rounded-lg p-3 bg-green-50 cursor-pointer hover:bg-green-100 transition-colors"
+                        onClick={() => setSelectedInstitution(inst.name)}
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="font-semibold text-sm">{inst.name}</h4>
-                          <Badge className="bg-green-100 text-green-800">
-                            {inst.completionRate}%
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-green-100 text-green-800">
+                              {inst.completionRate}%
+                            </Badge>
+                            <span className="text-xs text-blue-600 font-medium">상세보기 ›</span>
+                          </div>
                         </div>
                         <div className="text-xs text-gray-600">
                           <div>📍 {inst.district} | 규모: {inst.size === 'small' ? '소규모' : inst.size === 'medium' ? '중규모' : '대규모'}</div>
@@ -808,12 +867,19 @@ export default function EducationStatsPage() {
                 <CardContent>
                   <div className="space-y-3 max-h-96 overflow-y-auto">
                     {improvementNeeded.map((inst, index) => (
-                      <div key={index} className="border border-orange-200 rounded-lg p-3 bg-orange-50">
+                      <div 
+                        key={index} 
+                        className="border border-orange-200 rounded-lg p-3 bg-orange-50 cursor-pointer hover:bg-orange-100 transition-colors"
+                        onClick={() => setSelectedInstitution(inst.name)}
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="font-semibold text-sm">{inst.name}</h4>
-                          <Badge className="bg-orange-100 text-orange-800">
-                            {inst.completionRate}%
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-orange-100 text-orange-800">
+                              {inst.completionRate}%
+                            </Badge>
+                            <span className="text-xs text-blue-600 font-medium">상세보기 ›</span>
+                          </div>
                         </div>
                         <div className="text-xs text-gray-600">
                           <div>📍 {inst.district} | 규모: {inst.size === 'small' ? '소규모' : inst.size === 'medium' ? '중규모' : '대규모'}</div>
@@ -829,6 +895,114 @@ export default function EducationStatsPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* 선택된 기관 상세 정보 */}
+            {selectedInstitution && (() => {
+              const employeeDetails = getInstitutionEmployeeDetails(selectedInstitution);
+              const completedEmployees = employeeDetails.filter(emp => emp.isFullyCompleted);
+              const basicOnlyEmployees = employeeDetails.filter(emp => emp.basicEducationStatus === '수료' && emp.advancedEducationStatus !== '수료');
+              const advancedOnlyEmployees = employeeDetails.filter(emp => emp.advancedEducationStatus === '수료' && emp.basicEducationStatus !== '수료');
+              const noEducationEmployees = employeeDetails.filter(emp => emp.basicEducationStatus === '미이수' && emp.advancedEducationStatus === '미이수');
+              
+              return (
+                <Card className="border-2 border-blue-200 bg-blue-50">
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-blue-800">🔍 {selectedInstitution} - 상세 현황</CardTitle>
+                        <CardDescription>소속 종사자 {employeeDetails.length}명의 교육 이수 현황</CardDescription>
+                      </div>
+                      <button
+                        onClick={() => setSelectedInstitution(null)}
+                        className="text-blue-600 hover:text-blue-800 font-medium text-sm"
+                      >
+                        ✕ 닫기
+                      </button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {/* 요약 통계 */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                      <div className="bg-green-100 p-3 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-green-800">{completedEmployees.length}</div>
+                        <div className="text-sm text-green-600">완전이수</div>
+                        <div className="text-xs text-gray-500">(기초+심화)</div>
+                      </div>
+                      <div className="bg-blue-100 p-3 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-blue-800">{basicOnlyEmployees.length}</div>
+                        <div className="text-sm text-blue-600">기초만</div>
+                        <div className="text-xs text-gray-500">(심화 미이수)</div>
+                      </div>
+                      <div className="bg-purple-100 p-3 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-purple-800">{advancedOnlyEmployees.length}</div>
+                        <div className="text-sm text-purple-600">심화만</div>
+                        <div className="text-xs text-gray-500">(기초 미이수)</div>
+                      </div>
+                      <div className="bg-red-100 p-3 rounded-lg text-center">
+                        <div className="text-2xl font-bold text-red-800">{noEducationEmployees.length}</div>
+                        <div className="text-sm text-red-600">미이수</div>
+                        <div className="text-xs text-gray-500">(교육 없음)</div>
+                      </div>
+                    </div>
+                    
+                    {/* 직원 목록 */}
+                    <div className="space-y-4">
+                      <h4 className="font-semibold text-gray-800">소속 종사자 목록</h4>
+                      <div className="max-h-96 overflow-y-auto">
+                        <div className="grid gap-2">
+                          {employeeDetails.map((employee, idx) => (
+                            <div 
+                              key={idx} 
+                              className={`p-3 rounded-lg border ${
+                                employee.isFullyCompleted 
+                                  ? 'bg-green-50 border-green-200' 
+                                  : employee.basicEducationStatus === '수료' || employee.advancedEducationStatus === '수료'
+                                    ? 'bg-yellow-50 border-yellow-200'
+                                    : 'bg-red-50 border-red-200'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <div className="font-medium">{employee.name}</div>
+                                  <div className="text-sm text-gray-600">
+                                    {employee.jobType} | 입사: {employee.hireDate || '미등록'}
+                                    {employee.resignDate && ` | 퇴사: ${employee.resignDate}`}
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Badge 
+                                    className={`text-xs ${
+                                      employee.basicEducationStatus === '수료' 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : employee.basicEducationStatus === '미이수'
+                                          ? 'bg-red-100 text-red-800'
+                                          : 'bg-yellow-100 text-yellow-800'
+                                    }`}
+                                  >
+                                    기초: {employee.basicEducationStatus}
+                                  </Badge>
+                                  <Badge 
+                                    className={`text-xs ${
+                                      employee.advancedEducationStatus === '수료' 
+                                        ? 'bg-green-100 text-green-800' 
+                                        : employee.advancedEducationStatus === '미이수'
+                                          ? 'bg-red-100 text-red-800'
+                                          : 'bg-yellow-100 text-yellow-800'
+                                    }`}
+                                  >
+                                    심화: {employee.advancedEducationStatus}
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* 기관 규모별 효율성 */}
             <Card>
