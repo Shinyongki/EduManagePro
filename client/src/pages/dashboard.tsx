@@ -30,6 +30,8 @@ import type { IntegratedAnalysisData } from "@shared/schema";
 import GyeongsangnamMap from "@/components/dashboard/gyeongsangnam-map";
 import { IntegratedDataAnalyzer } from "@/utils/integrated-analysis";
 import { DataMigration } from "@/components/migration/data-migration";
+import { snapshotManager } from "@/lib/snapshot-manager";
+import { createUnifiedDataSource, calculateEducationStats, getActivePersons } from "@/utils/unified-data-source";
 
 interface EducationStatistics {
   totalParticipants: number;
@@ -64,6 +66,7 @@ export default function Dashboard() {
   const [selectedMapData, setSelectedMapData] = useState<'institutions' | 'education' | 'employees'>('institutions');
   const [showAllData, setShowAllData] = useState(false);
   const [previewCount, setPreviewCount] = useState(10);
+  const [currentSnapshotDate, setCurrentSnapshotDate] = useState<string>('2025-08-04');
   const { toast } = useToast();
   const { 
     integratedAnalysisData, 
@@ -77,7 +80,12 @@ export default function Dashboard() {
     retry,
     isLoaded
   } = useEducationData();
-  const { institutionData, employeeData } = useEmployeeStore();
+  const { institutionData, employeeData, loadEmployeeData } = useEmployeeStore();
+
+  // 종사자 데이터 자동 로딩
+  React.useEffect(() => {
+    loadEmployeeData();
+  }, [loadEmployeeData]);
 
   // Clear mock data on mount
   React.useEffect(() => {
@@ -103,6 +111,22 @@ export default function Dashboard() {
       console.warn('Failed to clear mock data:', error);
     }
   }, [integratedAnalysisData, setIntegratedAnalysisData]);
+
+  // 스냅샷 날짜 가져오기
+  React.useEffect(() => {
+    const loadSnapshotDate = async () => {
+      try {
+        const currentSnapshot = await snapshotManager.getCurrentSnapshot();
+        if (currentSnapshot?.date) {
+          setCurrentSnapshotDate(currentSnapshot.date);
+          console.log('📅 현재 스냅샷 날짜:', currentSnapshot.date);
+        }
+      } catch (error) {
+        console.error('스냅샷 날짜 로드 실패:', error);
+      }
+    };
+    loadSnapshotDate();
+  }, []);
 
   // Initialize with empty state on mount and fetch statistics
   React.useEffect(() => {
@@ -178,7 +202,8 @@ export default function Dashboard() {
           institutionData,
           basicEducationData || [],
           advancedEducationData || [],
-          participantData || []
+          participantData || [],
+          currentSnapshotDate // 동적으로 가져온 스냅샷 날짜 사용
         );
         
         console.log('분석 결과 생성됨:', generatedData?.length || 0, '개 기관');
@@ -244,7 +269,7 @@ export default function Dashboard() {
       console.error('Failed to generate analysis data:', error);
       return [];
     }
-  }, [integratedAnalysisData, institutionData, basicEducationData, advancedEducationData, participantData, employeeData]);
+  }, [integratedAnalysisData, institutionData, basicEducationData, advancedEducationData, participantData, employeeData, currentSnapshotDate]);
   
   // 미리보기용 데이터 (선택된 개수로 제한)
   const displayData = showAllData ? analysisData : analysisData.slice(0, previewCount);
@@ -317,7 +342,39 @@ export default function Dashboard() {
     });
   };
 
-  // Calculate key metrics
+  // 통합 데이터 소스를 사용한 일관된 통계 계산
+  const unifiedStats = useMemo(() => {
+    console.log('\n🔄 대시보드 통합 데이터 소스 생성 중...');
+    
+    if (!employeeData || !Array.isArray(employeeData)) {
+      console.log('❌ 종사자 데이터가 없습니다');
+      return null;
+    }
+    
+    const unifiedData = createUnifiedDataSource(
+      employeeData,
+      participantData || [],
+      basicEducationData || [],
+      advancedEducationData || [],
+      currentSnapshotDate
+    );
+    
+    const educationStats = calculateEducationStats(unifiedData);
+    const activePersons = getActivePersons(unifiedData);
+    
+    console.log('✅ 대시보드 통합 통계:', {
+      totalActive: activePersons.length,
+      educationStats
+    });
+    
+    return {
+      unifiedData,
+      educationStats,
+      totalParticipants: activePersons.length
+    };
+  }, [employeeData, participantData, basicEducationData, advancedEducationData, currentSnapshotDate]);
+
+  // Calculate key metrics (기존 분석 데이터 + 통합 통계 결합)
   const keyMetrics = useMemo(() => {
     const totalInstitutions = analysisData.length;
     const totalWorkers = analysisData.reduce((sum, item) => sum + (item.backup1_total || 0), 0);
@@ -329,13 +386,18 @@ export default function Dashboard() {
       return sum + ((item.education_rate_total || 0) < 70 ? 1 : 0);
     }, 0);
     
+    // 통합 데이터 소스에서 실제 참여자 수 가져오기
+    const unifiedParticipants = unifiedStats?.totalParticipants || totalWorkers;
+    
     return {
       totalInstitutions,
-      totalWorkers,
+      totalWorkers: unifiedParticipants, // 통합된 참여자 수 사용
       avgEducationRate,
-      warningCount
+      warningCount,
+      // 추가 통합 통계
+      unifiedEducationStats: unifiedStats?.educationStats
     };
-  }, [analysisData]);
+  }, [analysisData, unifiedStats]);
 
   // 지도 데이터 생성 함수
   const getMapData = () => {
@@ -555,7 +617,14 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-green-600">{keyMetrics.totalWorkers}명</div>
-            <p className="text-xs text-muted-foreground mt-1">전체 등록자</p>
+            <p className="text-xs text-muted-foreground mt-1">통합 데이터 기준 재직자</p>
+            {keyMetrics.unifiedEducationStats && (
+              <div className="mt-2 text-xs text-gray-600">
+                <div>교육 완료: {keyMetrics.unifiedEducationStats.complete}명</div>
+                <div>교육 진행: {keyMetrics.unifiedEducationStats.partial + keyMetrics.unifiedEducationStats.inProgress}명</div>
+                <div>미수료: {keyMetrics.unifiedEducationStats.none}명</div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -795,8 +864,8 @@ export default function Dashboard() {
                           <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.employment_life || '0'}</td>
                           <td className="border border-gray-300 px-2 py-2 text-xs text-center font-semibold text-blue-600">{row.employment_life_rate?.toFixed(1) || '0.0'}%</td>
                           <td className="border border-gray-300 px-2 py-2 text-xs text-center text-gray-600">{row.employment_life_reference || '-'}</td>
-                          <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.tenure_social ? `${row.tenure_social}일` : '-'}</td>
-                          <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.tenure_life ? `${row.tenure_life}일` : '-'}</td>
+                          <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.tenure_social !== undefined && row.tenure_social !== null ? `${row.tenure_social}일` : '-'}</td>
+                          <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.tenure_life !== undefined && row.tenure_life !== null ? `${row.tenure_life}일` : '-'}</td>
                           <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.education_target_total || '0'}</td>
                           <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.education_target_social || '0'}</td>
                           <td className="border border-gray-300 px-2 py-2 text-xs text-center">{row.education_target_life || '0'}</td>

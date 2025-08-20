@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>교육관리 시스템 - Education Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        border: "hsl(214.3 31.8% 91.4%)",
+                        input: "hsl(214.3 31.8% 91.4%)",
+                        ring: "hsl(221.2 83.2% 53.3%)",
+                        background: "hsl(0 0% 100%)",
+                        foreground: "hsl(222.2 84% 4.9%)",
+                        primary: {
+                            DEFAULT: "hsl(221.2 83.2% 53.3%)",
+                            foreground: "hsl(210 40% 98%)",
+                        },
+                        secondary: {
+                            DEFAULT: "hsl(210 40% 96%)",
+                            foreground: "hsl(222.2 84% 4.9%)",
+                        },
+                        destructive: {
+                            DEFAULT: "hsl(0 84.2% 60.2%)",
+                            foreground: "hsl(210 40% 98%)",
+                        },
+                        muted: {
+                            DEFAULT: "hsl(210 40% 96%)",
+                            foreground: "hsl(215.4 16.3% 46.9%)",
+                        },
+                        accent: {
+                            DEFAULT: "hsl(210 40% 96%)",
+                            foreground: "hsl(222.2 84% 4.9%)",
+                        },
+                        popover: {
+                            DEFAULT: "hsl(0 0% 100%)",
+                            foreground: "hsl(222.2 84% 4.9%)",
+                        },
+                        card: {
+                            DEFAULT: "hsl(0 0% 100%)",
+                            foreground: "hsl(222.2 84% 4.9%)",
+                        },
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-50 font-sans">
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-4">
+                    <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
+                        <i class="fas fa-graduation-cap text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-semibold text-slate-900">교육관리 시스템</h1>
+                        <p class="text-sm text-slate-500">Education Management System v2.0</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button class="inline-flex items-center px-4 py-2 border border-slate-300 rounded-md shadow-sm text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors">
+                        <i class="fas fa-download mr-2"></i>
+                        백업 다운로드
+                    </button>
+                    <button class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md shadow-sm text-sm font-medium hover:bg-primary/90 transition-colors">
+                        <i class="fas fa-save mr-2"></i>
+                        데이터 저장
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Progress Bar -->
+    <div class="bg-white border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-8">
+                    <!-- Step 1 -->
+                    <div class="flex items-center" data-step="1">
+                        <div class="w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center text-sm font-medium">
+                            1
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-primary">교육관리</p>
+                            <p class="text-xs text-slate-500">기본/심화 교육 데이터</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Arrow -->
+                    <i class="fas fa-arrow-right text-slate-400"></i>
+                    
+                    <!-- Step 2 -->
+                    <div class="flex items-center" data-step="2">
+                        <div class="w-8 h-8 bg-slate-300 text-slate-600 rounded-full flex items-center justify-center text-sm font-medium">
+                            2
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-600">종사자관리</p>
+                            <p class="text-xs text-slate-500">종사자/기관 현황</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Arrow -->
+                    <i class="fas fa-arrow-right text-slate-400"></i>
+                    
+                    <!-- Step 3 -->
+                    <div class="flex items-center" data-step="3">
+                        <div class="w-8 h-8 bg-slate-300 text-slate-600 rounded-full flex items-center justify-center text-sm font-medium">
+                            3
+                        </div>
+                        <div class="ml-3">
+                            <p class="text-sm font-medium text-slate-600">연동분석</p>
+                            <p class="text-xs text-slate-500">통합 분석 결과</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Progress Percentage -->
+                <div class="text-right">
+                    <p class="text-sm font-medium text-slate-900">33%</p>
+                    <p class="text-xs text-slate-500">완료</p>
+                </div>
+            </div>
+            
+            <!-- Progress Bar -->
+            <div class="mt-4">
+                <div class="w-full bg-slate-200 rounded-full h-2">
+                    <div class="bg-primary h-2 rounded-full transition-all duration-500" style="width: 33%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Tab Navigation -->
+        <div class="mb-8">
+            <div class="border-b border-slate-200">
+                <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                    <button class="tab-button active border-primary text-primary whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-tab="education">
+                        <i class="fas fa-book-open mr-2"></i>교육관리
+                    </button>
+                    <button class="tab-button border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-tab="employees">
+                        <i class="fas fa-users mr-2"></i>종사자관리
+                    </button>
+                    <button class="tab-button border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-tab="analysis">
+                        <i class="fas fa-chart-line mr-2"></i>연동분석
+                    </button>
+                    <button class="tab-button border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm" data-tab="dashboard">
+                        <i class="fas fa-tachometer-alt mr-2"></i>대시보드
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Education Management Tab -->
+        <div id="education-tab" class="tab-content">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                
+                <!-- Basic Education -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-900">기본교육 데이터</h3>
+                                <p class="text-sm text-slate-500 mt-1">기본 교육 수료 데이터를 업로드하세요</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full mr-1.5"></span>
+                                    대기중
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- File Upload Area -->
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors cursor-pointer" data-upload-area="basic">
+                            <i class="fas fa-cloud-upload-alt text-4xl text-slate-400 mb-4"></i>
+                            <h4 class="text-lg font-medium text-slate-900 mb-2">파일을 드래그하거나 클릭하여 업로드</h4>
+                            <p class="text-sm text-slate-500 mb-4">Excel (.xlsx, .xls) 또는 CSV 파일을 지원합니다</p>
+                            <button class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary/90 transition-colors">
+                                <i class="fas fa-file-upload mr-2"></i>
+                                파일 선택
+                            </button>
+                            <input type="file" class="hidden" accept=".xlsx,.xls,.csv" data-file-input="basic">
+                        </div>
+                        
+                        <!-- Text Input Alternative -->
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-slate-700 mb-2">또는 직접 입력</label>
+                            <textarea 
+                                class="w-full h-32 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none" 
+                                placeholder="교육 데이터를 복사하여 붙여넣기하세요..."
+                                data-text-input="basic"></textarea>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="mt-6 flex justify-end space-x-3">
+                            <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+                                초기화
+                            </button>
+                            <button class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 transition-colors">
+                                데이터 저장
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced Education -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-900">심화교육 데이터</h3>
+                                <p class="text-sm text-slate-500 mt-1">심화 교육 수료 데이터를 업로드하세요</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full mr-1.5"></span>
+                                    대기중
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- File Upload Area -->
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors cursor-pointer" data-upload-area="advanced">
+                            <i class="fas fa-cloud-upload-alt text-4xl text-slate-400 mb-4"></i>
+                            <h4 class="text-lg font-medium text-slate-900 mb-2">파일을 드래그하거나 클릭하여 업로드</h4>
+                            <p class="text-sm text-slate-500 mb-4">Excel (.xlsx, .xls) 또는 CSV 파일을 지원합니다</p>
+                            <button class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary/90 transition-colors">
+                                <i class="fas fa-file-upload mr-2"></i>
+                                파일 선택
+                            </button>
+                            <input type="file" class="hidden" accept=".xlsx,.xls,.csv" data-file-input="advanced">
+                        </div>
+                        
+                        <!-- Text Input Alternative -->
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-slate-700 mb-2">또는 직접 입력</label>
+                            <textarea 
+                                class="w-full h-32 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none" 
+                                placeholder="교육 데이터를 복사하여 붙여넣기하세요..."
+                                data-text-input="advanced"></textarea>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="mt-6 flex justify-end space-x-3">
+                            <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+                                초기화
+                            </button>
+                            <button class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 transition-colors">
+                                데이터 저장
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Education Data Preview -->
+            <div class="mt-8 bg-white rounded-lg shadow-sm border border-slate-200">
+                <div class="p-6 border-b border-slate-200">
+                    <h3 class="text-lg font-semibold text-slate-900">교육 데이터 미리보기</h3>
+                    <p class="text-sm text-slate-500 mt-1">업로드된 교육 데이터의 요약 정보입니다</p>
+                </div>
+                
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-graduation-cap text-blue-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-blue-600">기본교육 수료자</p>
+                                    <p class="text-2xl font-bold text-blue-900" data-basic-count>0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-award text-green-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-green-600">심화교육 수료자</p>
+                                    <p class="text-2xl font-bold text-green-900" data-advanced-count>0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-chart-bar text-amber-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-amber-600">전체 이수율</p>
+                                    <p class="text-2xl font-bold text-amber-900" data-completion-rate>0%</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Data Table -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-slate-200">
+                            <thead class="bg-slate-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">과정명</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">분류</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">수료인원</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">완료율</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">상태</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-slate-200" id="education-preview-table">
+                                <tr>
+                                    <td colspan="5" class="px-6 py-12 text-center text-slate-500">
+                                        <i class="fas fa-inbox text-4xl mb-4"></i>
+                                        <p>교육 데이터를 업로드하면 여기에 표시됩니다</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Employee Management Tab -->
+        <div id="employees-tab" class="tab-content hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                
+                <!-- Employee Status -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-900">종사자 현황</h3>
+                                <p class="text-sm text-slate-500 mt-1">종사자 현황 데이터를 업로드하세요</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full mr-1.5"></span>
+                                    대기중
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- File Upload Area -->
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors cursor-pointer" data-upload-area="employee">
+                            <i class="fas fa-users text-4xl text-slate-400 mb-4"></i>
+                            <h4 class="text-lg font-medium text-slate-900 mb-2">종사자 현황 파일 업로드</h4>
+                            <p class="text-sm text-slate-500 mb-4">Excel 또는 CSV 형식의 종사자 데이터</p>
+                            <button class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary/90 transition-colors">
+                                <i class="fas fa-file-upload mr-2"></i>
+                                파일 선택
+                            </button>
+                            <input type="file" class="hidden" accept=".xlsx,.xls,.csv" data-file-input="employee">
+                        </div>
+                        
+                        <!-- Manual Input -->
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-slate-700 mb-2">수동 입력</label>
+                            <textarea 
+                                class="w-full h-32 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none" 
+                                placeholder="종사자 데이터를 입력하세요..."
+                                data-text-input="employee"></textarea>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="mt-6 flex justify-end space-x-3">
+                            <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+                                초기화
+                            </button>
+                            <button class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 transition-colors">
+                                데이터 저장
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Institution Status -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-900">기관 현황</h3>
+                                <p class="text-sm text-slate-500 mt-1">기관별 배정 현황 데이터를 업로드하세요</p>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                    <span class="w-2 h-2 bg-slate-400 rounded-full mr-1.5"></span>
+                                    대기중
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- File Upload Area -->
+                        <div class="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors cursor-pointer" data-upload-area="institution">
+                            <i class="fas fa-building text-4xl text-slate-400 mb-4"></i>
+                            <h4 class="text-lg font-medium text-slate-900 mb-2">기관 현황 파일 업로드</h4>
+                            <p class="text-sm text-slate-500 mb-4">기관별 배정 및 채용 현황 데이터</p>
+                            <button class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary/90 transition-colors">
+                                <i class="fas fa-file-upload mr-2"></i>
+                                파일 선택
+                            </button>
+                            <input type="file" class="hidden" accept=".xlsx,.xls,.csv" data-file-input="institution">
+                        </div>
+                        
+                        <!-- Manual Input -->
+                        <div class="mt-6">
+                            <label class="block text-sm font-medium text-slate-700 mb-2">수동 입력</label>
+                            <textarea 
+                                class="w-full h-32 px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none" 
+                                placeholder="기관 현황 데이터를 입력하세요..."
+                                data-text-input="institution"></textarea>
+                        </div>
+                        
+                        <!-- Action Buttons -->
+                        <div class="mt-6 flex justify-end space-x-3">
+                            <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+                                초기화
+                            </button>
+                            <button class="px-4 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 transition-colors">
+                                데이터 저장
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Employee Statistics -->
+            <div class="mt-8 bg-white rounded-lg shadow-sm border border-slate-200">
+                <div class="p-6 border-b border-slate-200">
+                    <h3 class="text-lg font-semibold text-slate-900">종사자 통계</h3>
+                    <p class="text-sm text-slate-500 mt-1">종사자 현황에 대한 요약 통계입니다</p>
+                </div>
+                
+                <div class="p-6">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-user-tie text-blue-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-blue-600">전담사회복지사</p>
+                                    <p class="text-2xl font-bold text-blue-900" data-social-worker-count>0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-hands-helping text-green-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-green-600">생활지원사</p>
+                                    <p class="text-2xl font-bold text-green-900" data-life-support-count>0</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-amber-50 p-4 rounded-lg border border-amber-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-percentage text-amber-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-amber-600">충원률</p>
+                                    <p class="text-2xl font-bold text-amber-900" data-fill-rate>0%</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                            <div class="flex items-center">
+                                <i class="fas fa-clock text-purple-600 text-xl mr-3"></i>
+                                <div>
+                                    <p class="text-sm font-medium text-purple-600">평균 근속기간</p>
+                                    <p class="text-2xl font-bold text-purple-900" data-avg-tenure>0년</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Employee Table -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-slate-200">
+                            <thead class="bg-slate-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">이름</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">직무</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">기관</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">근속기간</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">교육이수</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">상태</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-slate-200" id="employee-preview-table">
+                                <tr>
+                                    <td colspan="6" class="px-6 py-12 text-center text-slate-500">
+                                        <i class="fas fa-users text-4xl mb-4"></i>
+                                        <p>종사자 데이터를 업로드하면 여기에 표시됩니다</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Analysis Tab -->
+        <div id="analysis-tab" class="tab-content hidden">
+            <div class="space-y-8">
+                
+                <!-- Analysis Controls -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <h3 class="text-lg font-semibold text-slate-900">연동 분석 설정</h3>
+                        <p class="text-sm text-slate-500 mt-1">교육 데이터와 종사자 데이터를 연동하여 분석합니다</p>
+                    </div>
+                    
+                    <div class="p-6">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">기준 날짜</label>
+                                <input type="date" class="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" value="2024-01-15">
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">분석 범위</label>
+                                <select class="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option>전체 기관</option>
+                                    <option>특정 기관</option>
+                                    <option>지역별</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-2">매칭 기준</label>
+                                <select class="w-full px-3 py-2 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option>ID 기반</option>
+                                    <option>이름 기반</option>
+                                    <option>기관+이름</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-6 flex justify-end space-x-3">
+                            <button class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors">
+                                설정 초기화
+                            </button>
+                            <button class="px-6 py-2 text-sm font-medium text-white bg-primary rounded-md hover:bg-primary/90 transition-colors">
+                                <i class="fas fa-play mr-2"></i>
+                                분석 실행
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Analysis Results -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-900">연동 분석 결과</h3>
+                                <p class="text-sm text-slate-500 mt-1">교육 이수 현황과 종사자 현황이 연동된 결과입니다</p>
+                            </div>
+                            <button class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 transition-colors">
+                                <i class="fas fa-file-excel mr-2"></i>
+                                Excel 내보내기
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="p-6">
+                        <!-- Key Metrics -->
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                            <div class="bg-gradient-to-r from-blue-500 to-blue-600 p-6 rounded-lg text-white">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-blue-100 text-sm">매칭 성공률</p>
+                                        <p class="text-3xl font-bold">92.5%</p>
+                                    </div>
+                                    <i class="fas fa-link text-blue-200 text-2xl"></i>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-r from-green-500 to-green-600 p-6 rounded-lg text-white">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-green-100 text-sm">교육 완료율</p>
+                                        <p class="text-3xl font-bold">87.3%</p>
+                                    </div>
+                                    <i class="fas fa-check-circle text-green-200 text-2xl"></i>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-r from-amber-500 to-amber-600 p-6 rounded-lg text-white">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-amber-100 text-sm">미이수자</p>
+                                        <p class="text-3xl font-bold">127명</p>
+                                    </div>
+                                    <i class="fas fa-exclamation-triangle text-amber-200 text-2xl"></i>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gradient-to-r from-purple-500 to-purple-600 p-6 rounded-lg text-white">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <p class="text-purple-100 text-sm">분석 대상</p>
+                                        <p class="text-3xl font-bold">1,245명</p>
+                                    </div>
+                                    <i class="fas fa-users text-purple-200 text-2xl"></i>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Analysis Table -->
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-slate-200">
+                                <thead class="bg-slate-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">이름</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">기관</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">직무</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">기본교육</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">심화교육</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">전체 이수율</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">상태</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-slate-200">
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">김민수</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">서울복지센터</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">전담사회복지사</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                완료
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                완료
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-900">100%</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                우수
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">이영희</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">부산복지센터</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">생활지원사</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                완료
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                미완료
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-900">50%</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                                미완료
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">박철호</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">대구복지센터</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">전담사회복지사</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                                                진행중
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+                                                대기
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-900">25%</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                진행중
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Pagination -->
+                        <div class="mt-6 flex items-center justify-between">
+                            <div class="text-sm text-slate-500">
+                                1-3 of 1,245 results
+                            </div>
+                            <div class="flex space-x-2">
+                                <button class="px-3 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                                    이전
+                                </button>
+                                <button class="px-3 py-2 bg-primary text-white rounded-md text-sm font-medium hover:bg-primary/90 transition-colors">
+                                    1
+                                </button>
+                                <button class="px-3 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                                    2
+                                </button>
+                                <button class="px-3 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                                    3
+                                </button>
+                                <button class="px-3 py-2 border border-slate-300 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                                    다음
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content hidden">
+            <div class="space-y-8">
+                
+                <!-- Overview Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-xl text-white shadow-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-blue-100 text-sm font-medium">총 종사자</p>
+                                <p class="text-3xl font-bold mt-2">1,245</p>
+                                <p class="text-blue-200 text-xs mt-1">전년 대비 +5.2%</p>
+                            </div>
+                            <div class="bg-blue-400 bg-opacity-30 p-3 rounded-lg">
+                                <i class="fas fa-users text-2xl"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-green-500 to-green-600 p-6 rounded-xl text-white shadow-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-green-100 text-sm font-medium">교육 완료율</p>
+                                <p class="text-3xl font-bold mt-2">87.3%</p>
+                                <p class="text-green-200 text-xs mt-1">목표 대비 +2.3%</p>
+                            </div>
+                            <div class="bg-green-400 bg-opacity-30 p-3 rounded-lg">
+                                <i class="fas fa-graduation-cap text-2xl"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-amber-500 to-amber-600 p-6 rounded-xl text-white shadow-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-amber-100 text-sm font-medium">충원률</p>
+                                <p class="text-3xl font-bold mt-2">92.8%</p>
+                                <p class="text-amber-200 text-xs mt-1">전월 대비 +1.5%</p>
+                            </div>
+                            <div class="bg-amber-400 bg-opacity-30 p-3 rounded-lg">
+                                <i class="fas fa-chart-line text-2xl"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-xl text-white shadow-lg">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-purple-100 text-sm font-medium">기관 수</p>
+                                <p class="text-3xl font-bold mt-2">156</p>
+                                <p class="text-purple-200 text-xs mt-1">활성 기관</p>
+                            </div>
+                            <div class="bg-purple-400 bg-opacity-30 p-3 rounded-lg">
+                                <i class="fas fa-building text-2xl"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Charts Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    
+                    <!-- Education Completion Chart -->
+                    <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                        <div class="p-6 border-b border-slate-200">
+                            <h3 class="text-lg font-semibold text-slate-900">교육 이수 현황</h3>
+                            <p class="text-sm text-slate-500 mt-1">월별 교육 완료 추이</p>
+                        </div>
+                        <div class="p-6">
+                            <!-- Chart placeholder -->
+                            <div class="h-64 bg-slate-50 rounded-lg flex items-center justify-center border-2 border-dashed border-slate-300">
+                                <div class="text-center">
+                                    <i class="fas fa-chart-bar text-4xl text-slate-400 mb-4"></i>
+                                    <p class="text-slate-500">교육 이수 차트</p>
+                                    <p class="text-xs text-slate-400 mt-1">Chart.js 또는 D3.js로 구현</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Employee Distribution Chart -->
+                    <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                        <div class="p-6 border-b border-slate-200">
+                            <h3 class="text-lg font-semibold text-slate-900">직무별 종사자 분포</h3>
+                            <p class="text-sm text-slate-500 mt-1">직무 유형별 인원 현황</p>
+                        </div>
+                        <div class="p-6">
+                            <!-- Chart placeholder -->
+                            <div class="h-64 bg-slate-50 rounded-lg flex items-center justify-center border-2 border-dashed border-slate-300">
+                                <div class="text-center">
+                                    <i class="fas fa-chart-pie text-4xl text-slate-400 mb-4"></i>
+                                    <p class="text-slate-500">직무별 분포 차트</p>
+                                    <p class="text-xs text-slate-400 mt-1">원형 또는 도넛 차트</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Recent Activities -->
+                <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+                    <div class="p-6 border-b border-slate-200">
+                        <h3 class="text-lg font-semibold text-slate-900">최근 활동</h3>
+                        <p class="text-sm text-slate-500 mt-1">시스템의 최근 업데이트 및 변경사항</p>
+                    </div>
+                    <div class="p-6">
+                        <div class="space-y-4">
+                            <div class="flex items-start space-x-4">
+                                <div class="w-2 h-2 bg-green-500 rounded-full mt-2"></div>
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-slate-900">기본교육 데이터 업데이트 완료</p>
+                                    <p class="text-xs text-slate-500">245명의 교육 수료 데이터가 추가되었습니다</p>
+                                    <p class="text-xs text-slate-400 mt-1">5분 전</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start space-x-4">
+                                <div class="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-slate-900">종사자 현황 데이터 동기화</p>
+                                    <p class="text-xs text-slate-500">서울복지센터 종사자 정보가 업데이트되었습니다</p>
+                                    <p class="text-xs text-slate-400 mt-1">15분 전</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start space-x-4">
+                                <div class="w-2 h-2 bg-amber-500 rounded-full mt-2"></div>
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-slate-900">월간 보고서 생성</p>
+                                    <p class="text-xs text-slate-500">2024년 1월 교육 현황 보고서가 생성되었습니다</p>
+                                    <p class="text-xs text-slate-400 mt-1">1시간 전</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex items-start space-x-4">
+                                <div class="w-2 h-2 bg-purple-500 rounded-full mt-2"></div>
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-slate-900">시스템 백업 완료</p>
+                                    <p class="text-xs text-slate-500">전체 데이터 백업이 성공적으로 완료되었습니다</p>
+                                    <p class="text-xs text-slate-400 mt-1">2시간 전</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-6 text-center">
+                            <button class="text-sm text-primary hover:text-primary/80 font-medium">
+                                모든 활동 보기
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 mt-16">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div class="flex flex-col md:flex-row justify-between items-center">
+                <div class="flex items-center space-x-4 mb-4 md:mb-0">
+                    <div class="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
+                        <i class="fas fa-graduation-cap text-white"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-slate-900">교육관리 시스템</p>
+                        <p class="text-xs text-slate-500">v2.0.0 - Modular Edition</p>
+                    </div>
+                </div>
+                <div class="text-center md:text-right">
+                    <p class="text-xs text-slate-500">© 2024 Education Management System. All rights reserved.</p>
+                    <p class="text-xs text-slate-400 mt-1">TypeScript + React + Shadcn/ui</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Tab functionality
+        (function() {
+            const tabButtons = document.querySelectorAll('.tab-button');
+            const tabContents = document.querySelectorAll('.tab-content');
+            const progressSteps = document.querySelectorAll('[data-step]');
+            const progressBar = document.querySelector('.bg-primary.h-2');
+            
+            // TODO: Implement React state management with Zustand
+            function switchTab(targetTab) {
+                // Hide all tab contents
+                tabContents.forEach(content => {
+                    content.classList.add('hidden');
+                });
+                
+                // Remove active class from all buttons
+                tabButtons.forEach(button => {
+                    button.classList.remove('active', 'border-primary', 'text-primary');
+                    button.classList.add('border-transparent', 'text-slate-500');
+                });
+                
+                // Show target tab content
+                const targetContent = document.getElementById(`${targetTab}-tab`);
+                if (targetContent) {
+                    targetContent.classList.remove('hidden');
+                }
+                
+                // Add active class to clicked button
+                const activeButton = document.querySelector(`[data-tab="${targetTab}"]`);
+                if (activeButton) {
+                    activeButton.classList.add('active', 'border-primary', 'text-primary');
+                    activeButton.classList.remove('border-transparent', 'text-slate-500');
+                }
+                
+                // Update progress
+                updateProgress(targetTab);
+            }
+            
+            function updateProgress(currentTab) {
+                // TODO: Implement with React state
+                const progressMap = {
+                    'education': { step: 1, percentage: 33 },
+                    'employees': { step: 2, percentage: 66 },
+                    'analysis': { step: 3, percentage: 100 },
+                    'dashboard': { step: 3, percentage: 100 }
+                };
+                
+                const currentProgress = progressMap[currentTab];
+                if (!currentProgress) return;
+                
+                // Update progress bar
+                if (progressBar) {
+                    progressBar.style.width = `${currentProgress.percentage}%`;
+                }
+                
+                // Update step indicators
+                progressSteps.forEach((step, index) => {
+                    const stepNumber = parseInt(step.dataset.step);
+                    const circle = step.querySelector('.w-8.h-8');
+                    const label = step.querySelector('.text-sm');
+                    
+                    if (stepNumber <= currentProgress.step) {
+                        // Completed or current step
+                        circle.classList.remove('bg-slate-300', 'text-slate-600');
+                        circle.classList.add('bg-primary', 'text-white');
+                        label.classList.remove('text-slate-600');
+                        label.classList.add('text-primary');
+                    } else {
+                        // Future step
+                        circle.classList.remove('bg-primary', 'text-white');
+                        circle.classList.add('bg-slate-300', 'text-slate-600');
+                        label.classList.remove('text-primary');
+                        label.classList.add('text-slate-600');
+                    }
+                });
+                
+                // Update percentage display
+                const percentageElement = document.querySelector('.text-right .text-sm');
+                if (percentageElement) {
+                    percentageElement.textContent = `${currentProgress.percentage}%`;
+                }
+            }
+            
+            // Add click event listeners
+            tabButtons.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const targetTab = button.dataset.tab;
+                    switchTab(targetTab);
+                });
+            });
+            
+            // File upload functionality
+            const uploadAreas = document.querySelectorAll('[data-upload-area]');
+            const fileInputs = document.querySelectorAll('[data-file-input]');
+            
+            uploadAreas.forEach(area => {
+                const uploadType = area.dataset.uploadArea;
+                const fileInput = document.querySelector(`[data-file-input="${uploadType}"]`);
+                
+                // Click to upload
+                area.addEventListener('click', () => {
+                    fileInput?.click();
+                });
+                
+                // Drag and drop
+                area.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    area.classList.add('border-primary', 'bg-blue-50');
+                });
+                
+                area.addEventListener('dragleave', () => {
+                    area.classList.remove('border-primary', 'bg-blue-50');
+                });
+                
+                area.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    area.classList.remove('border-primary', 'bg-blue-50');
+                    
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        handleFileUpload(files[0], uploadType);
+                    }
+                });
+            });
+            
+            // File input change handlers
+            fileInputs.forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    const uploadType = input.dataset.fileInput;
+                    if (file) {
+                        handleFileUpload(file, uploadType);
+                    }
+                });
+            });
+            
+            function handleFileUpload(file, type) {
+                // TODO: Implement file processing with React Query
+                console.log(`Uploading ${type} file:`, file.name);
+                
+                // Show loading state
+                const uploadArea = document.querySelector(`[data-upload-area="${type}"]`);
+                if (uploadArea) {
+                    const icon = uploadArea.querySelector('i');
+                    const title = uploadArea.querySelector('h4');
+                    
+                    // Show loading
+                    icon.className = 'fas fa-spinner fa-spin text-4xl text-blue-500 mb-4';
+                    title.textContent = '파일 처리중...';
+                    
+                    // Simulate processing
+                    setTimeout(() => {
+                        icon.className = 'fas fa-check-circle text-4xl text-green-500 mb-4';
+                        title.textContent = `${file.name} 업로드 완료`;
+                        
+                        // Update status badge
+                        const statusBadge = uploadArea.closest('.bg-white').querySelector('.inline-flex.items-center');
+                        if (statusBadge) {
+                            statusBadge.innerHTML = `
+                                <span class="w-2 h-2 bg-green-500 rounded-full mr-1.5"></span>
+                                완료
+                            `;
+                            statusBadge.classList.remove('bg-slate-100', 'text-slate-800');
+                            statusBadge.classList.add('bg-green-100', 'text-green-800');
+                        }
+                    }, 2000);
+                }
+            }
+            
+            // Initialize with first tab
+            switchTab('education');
+        })();
+    </script>
+</body>
+</html>

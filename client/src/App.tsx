@@ -12,7 +12,8 @@ import EmployeeDataPage from "@/pages/employee-data";
 import InstitutionDataPage from "@/pages/institution-data";
 import EducationStatsPage from "@/pages/education-stats";
 import InstitutionStatsPage from "@/pages/institution-stats";
-import EmployeeStatsPage from "@/pages/employee-stats";
+import EmployeeStatsPage from "@/pages/employee-stats-basic";
+import TestRoute from "@/pages/test-route";
 
 function Router() {
   return (

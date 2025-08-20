@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { Users, TrendingUp, Calendar, Award, Briefcase, MapPin, Clock, UserCheck } from 'lucide-react';
 
-function EmployeeStats() {
+function EmployeeStatsPage() {
   const { employeeData = [], setEmployeeData } = useEmployeeStore();
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -399,4 +399,4 @@ function EmployeeStats() {
   );
 }
 
-export default EmployeeStats;
+export default EmployeeStatsPage;

@@ -264,9 +264,34 @@ export const useEducationStore = create<EducationStore>()(
               break;
               
             case 'employee':
-              const employeeData = await educationDB.getItem<EmployeeData[]>('employeeData');
+              const rawEmployeeData = await educationDB.getItem('employeeData');
+              console.log('🔍 IndexedDB에서 가져온 원본 종사자 데이터:', rawEmployeeData);
+              
+              let processedEmployeeData: EmployeeData[] = [];
+              
+              if (rawEmployeeData) {
+                // API 응답 객체 구조 확인 (data 배열 포함)
+                if (!Array.isArray(rawEmployeeData) && rawEmployeeData && typeof rawEmployeeData === 'object') {
+                  if (Array.isArray(rawEmployeeData.data)) {
+                    console.log('✅ API 응답 객체에서 종사자 데이터 배열 추출:', rawEmployeeData.data.length, '개');
+                    processedEmployeeData = rawEmployeeData.data;
+                  } else {
+                    console.warn('⚠️ employeeData 객체에 data 배열이 없습니다:', rawEmployeeData);
+                  }
+                } else if (Array.isArray(rawEmployeeData)) {
+                  console.log('✅ 직접 종사자 데이터 배열:', rawEmployeeData.length, '개');
+                  processedEmployeeData = rawEmployeeData;
+                } else {
+                  console.warn('⚠️ 종사자 데이터 구조를 인식할 수 없습니다:', typeof rawEmployeeData, rawEmployeeData);
+                }
+              } else {
+                console.log('⚠️ IndexedDB에 종사자 데이터가 없습니다');
+              }
+              
+              console.log(`🎯 최종 처리된 종사자 데이터: ${processedEmployeeData.length}명`);
+              
               set((state) => ({
-                employeeData: employeeData || [],
+                employeeData: processedEmployeeData,
                 isLoaded: { ...state.isLoaded, employee: true }
               }));
               break;
@@ -320,12 +345,34 @@ export const useEducationStore = create<EducationStore>()(
               break;
               
             case 'employee':
-              const employeeData = await educationDB.getItem<EmployeeData[]>('employeeData');
+              const rawEmployeeDataForce = await educationDB.getItem('employeeData');
+              console.log('🔄 Force reload - IndexedDB에서 가져온 원본 종사자 데이터:', rawEmployeeDataForce);
+              
+              let processedEmployeeDataForce: EmployeeData[] = [];
+              
+              if (rawEmployeeDataForce) {
+                if (!Array.isArray(rawEmployeeDataForce) && rawEmployeeDataForce && typeof rawEmployeeDataForce === 'object') {
+                  if (Array.isArray(rawEmployeeDataForce.data)) {
+                    console.log('✅ Force reload - API 응답 객체에서 종사자 데이터 배열 추출:', rawEmployeeDataForce.data.length, '개');
+                    processedEmployeeDataForce = rawEmployeeDataForce.data;
+                  } else {
+                    console.warn('⚠️ Force reload - employeeData 객체에 data 배열이 없습니다:', rawEmployeeDataForce);
+                  }
+                } else if (Array.isArray(rawEmployeeDataForce)) {
+                  console.log('✅ Force reload - 직접 종사자 데이터 배열:', rawEmployeeDataForce.length, '개');
+                  processedEmployeeDataForce = rawEmployeeDataForce;
+                } else {
+                  console.warn('⚠️ Force reload - 종사자 데이터 구조를 인식할 수 없습니다:', typeof rawEmployeeDataForce);
+                }
+              } else {
+                console.log('⚠️ Force reload - IndexedDB에 종사자 데이터가 없습니다');
+              }
+              
               set((state) => ({
-                employeeData: employeeData || [],
+                employeeData: processedEmployeeDataForce,
                 isLoaded: { ...state.isLoaded, employee: true }
               }));
-              console.log(`✅ Force reloaded employee data: ${(employeeData || []).length} records`);
+              console.log(`✅ Force reloaded employee data: ${processedEmployeeDataForce.length} records`);
               break;
           }
         } catch (error) {
@@ -535,8 +582,11 @@ export const useEducationStore = create<EducationStore>()(
         const activeParticipants = participantData.filter(participant => {
           const { employeeData } = get();
           
+          // 배열 안전성 검증
+          const safeEmployeeData = Array.isArray(employeeData) ? employeeData : [];
+          
           // 🔥 중요: 종사자 관리 데이터 우선 처리 로직 (생년월일 기준 동일인 판별)
-          const matchingEmployee = (employeeData || []).find(emp => 
+          const matchingEmployee = safeEmployeeData.find(emp => 
             emp.name === participant.name && 
             emp.birthDate === participant.birthDate
           );
@@ -706,7 +756,12 @@ export const useEducationStore = create<EducationStore>()(
       },
 
       getEducationSummaryStats: () => {
-        const { participantData, basicEducationData, advancedEducationData } = get();
+        const { participantData: rawParticipantData, basicEducationData: rawBasicEducationData, advancedEducationData: rawAdvancedEducationData } = get();
+        
+        // 배열 안전성 검증
+        const participantData = Array.isArray(rawParticipantData) ? rawParticipantData : [];
+        const basicEducationData = Array.isArray(rawBasicEducationData) ? rawBasicEducationData : [];
+        const advancedEducationData = Array.isArray(rawAdvancedEducationData) ? rawAdvancedEducationData : [];
         
         console.log('\n📊 교육 통계 계산 시작 (참가자 기준)');
         console.log('전체 참가자 수:', participantData.length);
@@ -717,8 +772,11 @@ export const useEducationStore = create<EducationStore>()(
         const activeParticipants = participantData.filter(participant => {
           const { employeeData } = get();
           
+          // 배열 안전성 검증
+          const safeEmployeeData = Array.isArray(employeeData) ? employeeData : [];
+          
           // 🔥 중요: 종사자 관리 데이터 우선 처리 로직 (생년월일 기준 동일인 판별)
-          const matchingEmployee = (employeeData || []).find(emp => 
+          const matchingEmployee = safeEmployeeData.find(emp => 
             emp.name === participant.name && 
             emp.birthDate === participant.birthDate
           );
@@ -826,17 +884,22 @@ export const useEducationStore = create<EducationStore>()(
       getAllParticipantEducationStatus: (): ParticipantEducationStatus[] => {
         const { participantData, basicEducationData, advancedEducationData } = get();
         
+        // 배열 안전성 검증
+        const safeParticipantData = Array.isArray(participantData) ? participantData : [];
+        const safeBasicEducationData = Array.isArray(basicEducationData) ? basicEducationData : [];
+        const safeAdvancedEducationData = Array.isArray(advancedEducationData) ? advancedEducationData : [];
+        
         console.log('🔍 모든 참가자 교육 상태 조회 (재직자 필터링 없음)');
-        console.log('전체 참가자 수:', participantData.length);
+        console.log('전체 참가자 수:', safeParticipantData.length);
         
         // 재직자 필터링 없이 모든 참가자 처리
-        return participantData.map((participant, index) => {
+        return safeParticipantData.map((participant, index) => {
           // ID 또는 이름으로 교육 데이터 매칭
-          const basicEducation = basicEducationData.find(
+          const basicEducation = safeBasicEducationData.find(
             edu => edu.id === participant.id || edu.name === participant.name
           );
           
-          const advancedEducation = advancedEducationData.find(
+          const advancedEducation = safeAdvancedEducationData.find(
             edu => edu.id === participant.id || edu.name === participant.name
           );
 
@@ -901,15 +964,21 @@ export const useEducationStore = create<EducationStore>()(
         });
       },
 
-      getDataInconsistencies: () => {
-        const { participantData, employeeData: rawEmployeeData } = get();
+      getDataInconsistencies: (externalEmployeeData?: any[]) => {
+        const { participantData } = get();
+        
+        // 외부에서 전달받은 종사자 데이터 사용 (participants 페이지에서 전달)
+        const rawEmployeeData = externalEmployeeData || [];
+        console.log('✅ 외부에서 전달받은 종사자 데이터:', rawEmployeeData.length, '명');
         
         console.log('\n🔍 데이터 일관성 검사 시작 (생년월일 기준 동일인 판별)');
         console.log('참가자 데이터(배움터):', participantData.length, '명');
-        console.log('종사자 데이터(모인우리) 원본:', rawEmployeeData.length, '명');
+        // 배열 안전성 검증
+        const safeRawEmployeeData = Array.isArray(rawEmployeeData) ? rawEmployeeData : [];
+        console.log('종사자 데이터(모인우리) 원본:', safeRawEmployeeData.length, '명');
         
         // 종사자 데이터 보정 (컬럼 밀림 수정) - 강화된 로직 적용
-        const employeeData = rawEmployeeData.map(emp => {
+        const employeeData = safeRawEmployeeData.map(emp => {
           // 데이터 검증 및 디버깅 (교육 스토어)
           if (emp.name === '백현태') {
             console.log(`🔍 [교육스토어] 백현태님 원본 데이터:`, emp);
@@ -941,7 +1010,7 @@ export const useEducationStore = create<EducationStore>()(
         console.log('종사자 데이터 보정 후:', employeeData.length, '명');
         
         // 원본 종사자 데이터가 없는 경우 빈 배열 반환
-        if (rawEmployeeData.length === 0) {
+        if (safeRawEmployeeData.length === 0) {
           console.warn('⚠️ 종사자 데이터(모인우리)가 없습니다. 종사자 데이터를 먼저 업로드해주세요.');
           console.log('📌 정확한 불일치 분석을 위해서는 종사자 데이터 업로드가 필요합니다.');
           return []; // 임시 데이터를 생성하지 않고 빈 배열 반환
@@ -951,6 +1020,9 @@ export const useEducationStore = create<EducationStore>()(
         const findMatchingEmployee = (participant: EducationParticipant): EmployeeData | null => {
           if (!participant.name) return null;
           
+          // 배열 안전성 검증
+          const safeEmployeeData = Array.isArray(employeeData) ? employeeData : [];
+          
           // 백현태님 특별 디버깅
           if (participant.name?.includes('백현태')) {
             console.log('\n🔍 [보정된 데이터로] 백현태님 매칭 디버깅:');
@@ -958,7 +1030,7 @@ export const useEducationStore = create<EducationStore>()(
             console.log('- 참가자 생년월일:', participant.birthDate);
             console.log('- 보정된 종사자 데이터 중 이름이 일치하는 사람들:');
             
-            const nameMatches = employeeData.filter(emp => emp.name?.includes('백현태'));
+            const nameMatches = safeEmployeeData.filter(emp => emp.name?.includes('백현태'));
             nameMatches.forEach((emp, idx) => {
               console.log(`  ${idx + 1}. 이름: ${emp.name}, 생년월일: ${emp.birthDate}, 상태: ${emp.isActive}, 퇴사일: ${emp.resignDate}, 보정됨: ${emp.corrected}`);
             });
@@ -970,7 +1042,7 @@ export const useEducationStore = create<EducationStore>()(
             }
           }
           
-          return employeeData.find(emp => {
+          return safeEmployeeData.find(emp => {
             // 이름 매칭 (정확 일치)
             const nameMatch = emp.name === participant.name;
             

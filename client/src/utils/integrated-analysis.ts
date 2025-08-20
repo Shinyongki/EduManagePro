@@ -58,7 +58,8 @@ export class IntegratedDataAnalyzer {
     institutionData: InstitutionData[],
     basicEducationData: EducationData[],
     advancedEducationData: EducationData[],
-    participantData: EducationParticipant[]
+    participantData: EducationParticipant[],
+    snapshotDate?: string // 스냅샷 날짜 추가 (YYYY-MM-DD 형식)
   ): AnalysisRow[] {
     
     const analysisRows: AnalysisRow[] = [];
@@ -407,7 +408,8 @@ export class IntegratedDataAnalyzer {
         const totalTenureDays = validEmployees.reduce((sum, emp) => {
           try {
             const hireDate = new Date(emp.hireDate!);
-            const today = new Date();
+            // 스냅샷 날짜가 있으면 해당 날짜 기준, 없으면 현재 날짜 기준
+            const referenceDate = snapshotDate ? new Date(snapshotDate) : new Date();
             
             // 유효한 날짜인지 확인
             if (isNaN(hireDate.getTime())) {
@@ -415,9 +417,9 @@ export class IntegratedDataAnalyzer {
               return sum;
             }
             
-            const days = Math.floor((today.getTime() - hireDate.getTime()) / (1000 * 60 * 60 * 24));
+            const days = Math.floor((referenceDate.getTime() - hireDate.getTime()) / (1000 * 60 * 60 * 24));
             const validDays = Math.max(0, days);
-            console.log(`- ${emp.name} (${emp.hireDate}): ${validDays}일`);
+            console.log(`- ${emp.name} (${emp.hireDate}): ${validDays}일 (기준일: ${referenceDate.toISOString().split('T')[0]})`);
             return sum + validDays;
           } catch (error) {
             console.warn(`[${jobTypeName}] 근속기간 계산 오류:`, emp.hireDate, error);

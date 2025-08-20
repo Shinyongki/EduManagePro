@@ -147,6 +147,17 @@ export class SnapshotManager {
     return snapshotList.currentSnapshot;
   }
 
+  // 현재 스냅샷 해제
+  async clearCurrentSnapshot(): Promise<void> {
+    const snapshotList = await this.getSnapshotList();
+    snapshotList.currentSnapshot = null;
+    snapshotList.lastUpdated = new Date().toISOString();
+    
+    await this.db.setItem(this.SNAPSHOTS_KEY, snapshotList);
+    
+    console.log('📅 현재 스냅샷 해제됨');
+  }
+
   // 스냅샷 메타데이터만 가져오기 (목록 표시용)
   async getSnapshotMetadata(): Promise<Array<{
     date: string;

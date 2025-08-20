@@ -440,18 +440,63 @@ export default function EmployeeDataPage() {
         description: "모든 종사자 데이터가 삭제되었습니다.",
       });
 
-      // 스토어 데이터 즉시 초기화
+      // 스토어 데이터 즉시 초기화 - 빈 배열로 명확히 설정
       setEmployeeData([]);
+      console.log('✅ 스토어 employeeData를 빈 배열로 초기화');
+      
+      // IndexedDB 완전 삭제
+      try {
+        const { IndexedDBStorage } = await import('@/lib/indexeddb');
+        const educationDB = new IndexedDBStorage();
+        
+        // employeeData 삭제
+        await educationDB.removeItem('employeeData');
+        console.log('✅ IndexedDB employeeData 삭제 완료');
+        
+        // 스냅샷에서도 employeeData 제거
+        const currentSnapshot = await snapshotManager.getCurrentSnapshot();
+        if (currentSnapshot) {
+          currentSnapshot.employeeData = [];
+          const snapshotList = await snapshotManager.getSnapshotList();
+          if (snapshotList.currentSnapshot) {
+            snapshotList.snapshots[snapshotList.currentSnapshot].employeeData = [];
+            await educationDB.setItem('dataSnapshots', snapshotList);
+            console.log('✅ 스냅샷에서 employeeData 제거 완료');
+          }
+        }
+      } catch (e) {
+        console.error('IndexedDB 삭제 실패:', e);
+      }
 
       // localStorage 강제 클리어 (Zustand persist 때문에)
       try {
         localStorage.removeItem('employee-store');
+        localStorage.removeItem('employee-storage');
+        // education-store도 클리어
+        const educationStore = localStorage.getItem('education-store');
+        if (educationStore) {
+          const parsed = JSON.parse(educationStore);
+          if (parsed.state) {
+            parsed.state.employeeData = [];
+            localStorage.setItem('education-store', JSON.stringify(parsed));
+          }
+        }
       } catch (e) {
         console.warn('localStorage 클리어 실패:', e);
       }
 
-      // 데이터 다시 로드
-      await fetchEmployeeData();
+      // education-store의 employeeData도 초기화
+      try {
+        const { useEducationStore } = await import('@/store/education-store');
+        const { setEmployeeData: setEducationEmployeeData } = useEducationStore.getState();
+        setEducationEmployeeData([]);
+        console.log('✅ education-store employeeData 초기화 완료');
+      } catch (e) {
+        console.warn('education-store 초기화 실패:', e);
+      }
+
+      // 강제로 페이지 새로고침
+      window.location.reload();
 
     } catch (error) {
       toast({
@@ -536,8 +581,24 @@ export default function EmployeeDataPage() {
     }
   };
 
-  // 데이터 필터링 및 페이지네이션
-  const filteredData = (employeeData || []).filter(item => {
+  // 데이터 필터링 및 페이지네이션 - API 응답 객체 처리 및 배열 체크 추가
+  let actualEmployeeData = employeeData;
+  
+  // API 응답 형태 {data: Array, pagination: Object} 처리
+  if (!Array.isArray(employeeData) && employeeData && typeof employeeData === 'object') {
+    if (Array.isArray(employeeData.data)) {
+      console.log('✅ API 응답 객체에서 데이터 배열 추출:', employeeData.data.length, '개');
+      actualEmployeeData = employeeData.data;
+    } else {
+      console.warn('⚠️ employeeData가 배열이 아닙니다:', typeof employeeData, employeeData);
+      actualEmployeeData = [];
+    }
+  } else if (!Array.isArray(employeeData)) {
+    console.warn('⚠️ employeeData가 배열이 아닙니다:', typeof employeeData, employeeData);
+    actualEmployeeData = [];
+  }
+  
+  const filteredData = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(item => {
     // 상태 필터링
     if (statusFilter === 'active' && !item.isActive) return false;
     if (statusFilter === 'inactive' && item.isActive) return false;
@@ -710,7 +771,7 @@ export default function EmployeeDataPage() {
               <Button
                 variant="destructive"
                 onClick={handleClearData}
-                disabled={isLoading || !employeeData || employeeData.length === 0}
+                disabled={isLoading || !actualEmployeeData || actualEmployeeData.length === 0}
               >
                 데이터 초기화
               </Button>
@@ -768,7 +829,7 @@ export default function EmployeeDataPage() {
                   <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-muted-foreground" />
                   <div className="text-muted-foreground">데이터를 불러오는 중...</div>
                 </div>
-              ) : !employeeData || employeeData.length === 0 ? (
+              ) : !actualEmployeeData || actualEmployeeData.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="text-muted-foreground">
                     아직 업로드된 종사자 데이터가 없습니다.
@@ -791,7 +852,7 @@ export default function EmployeeDataPage() {
                             // 전담사회복지사 필터링 시에는 재직 전담사회복지사 수만 표시
                             <div className="p-4 bg-blue-100 rounded-md">
                               <div className="text-lg font-semibold">
-                                {(employeeData || []).filter(emp => {
+                                {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
                                   // 전담사회복지사인지 확인
                                   const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
                                   if (!isSocialWorker) return false;
@@ -815,7 +876,7 @@ export default function EmployeeDataPage() {
                             // 생활지원사 필터링 시에는 재직 생활지원사 수만 표시
                             <div className="p-4 bg-green-100 rounded-md">
                               <div className="text-lg font-semibold">
-                                {(employeeData || []).filter(emp => {
+                                {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
                                   // 생활지원사인지 확인
                                   if (emp.jobType !== '생활지원사') return false;
                                   
@@ -839,7 +900,7 @@ export default function EmployeeDataPage() {
                             <>
                               <div className="p-4 bg-muted rounded-md">
                                 <div className="text-lg font-semibold">
-                                  {(employeeData || []).filter(emp => {
+                                  {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
                                     // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
                                     if (emp.resignDate) {
                                       try {
@@ -858,7 +919,7 @@ export default function EmployeeDataPage() {
                               </div>
                               <div className="p-4 bg-blue-50 rounded-md">
                                 <div className="text-lg font-semibold">
-                                  {(employeeData || []).filter(emp => {
+                                  {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
                                     // 전담사회복지사인지 확인
                                     const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
                                     if (!isSocialWorker) return false;
@@ -880,7 +941,7 @@ export default function EmployeeDataPage() {
                               </div>
                               <div className="p-4 bg-green-50 rounded-md">
                                 <div className="text-lg font-semibold">
-                                  {(employeeData || []).filter(emp => {
+                                  {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
                                     // 생활지원사인지 확인
                                     if (emp.jobType !== '생활지원사') return false;
                                     

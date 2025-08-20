@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -6,6 +6,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, 
 import { useEducationStore } from "@/store/education-store";
 import { useEmployeeStore } from "@/store/employee-store";
 import { BookOpen, GraduationCap, TrendingUp, Users, Award, CheckCircle2, Clock, XCircle, AlertCircle } from "lucide-react";
+import { 
+  createUnifiedDataSource, 
+  createParticipantBasedStats,
+  calculateEducationStats, 
+  calculateEducationParticipants,
+  getActivePersons 
+} from "@/utils/unified-data-source";
 
 export default function EducationStatsPage() {
   const { 
@@ -17,120 +24,222 @@ export default function EducationStatsPage() {
     getParticipantEducationStatus
   } = useEducationStore();
 
-  const { employeeData } = useEmployeeStore();
+  const { employeeData, loadEmployeeData } = useEmployeeStore();
 
-  const [refreshKey, setRefreshKey] = useState(0);
   const [selectedInstitution, setSelectedInstitution] = useState<string | null>(null);
 
+  // 종사자 데이터 자동 로딩
   useEffect(() => {
-    // 페이지가 로드될 때마다 새로고침
-    setRefreshKey(prev => prev + 1);
-  }, [basicEducationData, advancedEducationData, participantData]);
+    loadEmployeeData();
+  }, [loadEmployeeData]);
 
+  // 🎯 소속회원 기준 교육 통계 계산 (소속회원 목록과 통일)
+  const participantBasedStats = useMemo(() => {
+    if (!participantData || participantData.length === 0) {
+      return { 
+        allParticipants: [], 
+        activeParticipants: [], 
+        totalCount: 0, 
+        activeCount: 0,
+        stats: { total: 0, complete: 0, partial: 0, inProgress: 0, none: 0 }
+      };
+    }
+    
+    console.log('\n📊 교육통계: 소속회원 기준 통계 계산');
+    console.log('- 참조 데이터: 소속회원', participantData.length, '명');
+    
+    const result = createParticipantBasedStats(
+      participantData,
+      basicEducationData || [],
+      advancedEducationData || [],
+      '2025-08-04' // 스냅샷 날짜 기준
+    );
+    
+    // 교육 통계 계산
+    const stats = {
+      total: result.activeCount,
+      complete: 0,
+      partial: 0,
+      inProgress: 0,
+      none: 0
+    };
+    
+    result.activeParticipants.forEach(participant => {
+      const basicCompleted = participant.basicEducationStatus === '수료' || 
+                            participant.basicEducationStatus === '완료' ||
+                            participant.basicTraining === '수료' ||
+                            participant.basicTraining === '완료';
+      const advancedCompleted = participant.advancedEducationStatus === '수료' || 
+                               participant.advancedEducationStatus === '완료' ||
+                               participant.advancedEducation === '수료' ||
+                               participant.advancedEducation === '완료';
+      
+      if (basicCompleted && advancedCompleted) {
+        stats.complete++;
+      } else if (basicCompleted || advancedCompleted) {
+        stats.partial++;
+      } else if (participant.basicEducationStatus || participant.advancedEducationStatus ||
+                 participant.basicTraining || participant.advancedEducation) {
+        stats.inProgress++;
+      } else {
+        stats.none++;
+      }
+    });
+    
+    console.log('📈 교육통계 결과:', stats);
+    console.log('✅ 소속회원 목록과 동일한 기준 적용');
+    
+    return { ...result, stats };
+  }, [participantData, basicEducationData, advancedEducationData]);
+
+  // 기존 통계 (비교용)
   const educationStats = getEducationStats();
   const summaryStats = getEducationSummaryStats();
   const participantStatuses = getParticipantEducationStatus();
   
-  // 기관별 직원 상세 정보 가져오기
-  const getInstitutionEmployeeDetails = (institutionName: string) => {
-    // 해당 기관의 참가자 데이터 필터링
-    const institutionParticipants = participantData.filter(p => 
+  // 소속회원 기준 기관별 상세 정보 가져오기 (useCallback으로 최적화)
+  const getInstitutionEmployeeDetails = useCallback((institutionName: string) => {
+    if (!participantBasedStats.activeParticipants || participantBasedStats.activeParticipants.length === 0) {
+      return [];
+    }
+
+    // 해당 기관의 소속회원 데이터 필터링
+    const institutionParticipants = participantBasedStats.activeParticipants.filter(p => 
       p.institution === institutionName ||
       p.institution?.includes(institutionName) ||
       institutionName?.includes(p.institution)
     );
     
-    // 해당 기관의 종사자 데이터 필터링
-    const institutionEmployees = employeeData.filter(emp => 
-      emp.institution === institutionName ||
-      emp.institution?.includes(institutionName) ||
-      institutionName?.includes(emp.institution)
-    );
+    console.log(`🔍 [${institutionName}] 상세보기 - 소속회원 ${institutionParticipants.length}명 발견`);
     
-    // 각 직원의 교육 이수 현황 매칭
-    return institutionEmployees.map(employee => {
-      const participantMatch = institutionParticipants.find(p => 
-        p.name === employee.name || 
-        (p.residentId && employee.residentId && p.residentId === employee.residentId)
-      );
+    // 광역지원기관 특별 디버깅
+    if (institutionName?.includes('광역') || institutionName?.includes('경상남도사회서비스원')) {
+      console.log(`\n🏛️ [광역지원기관 상세보기] ${institutionName}`);
+      console.log('- 매칭된 소속회원 수:', institutionParticipants.length);
+      console.log('- 매칭 조건들:');
+      console.log(`  * 정확일치: ${participantBasedStats.activeParticipants.filter(p => p.institution === institutionName).length}명`);
+      console.log(`  * 기관명이 소속회원institution포함: ${participantBasedStats.activeParticipants.filter(p => p.institution?.includes(institutionName)).length}명`);
+      console.log(`  * 소속회원institution이 기관명포함: ${participantBasedStats.activeParticipants.filter(p => institutionName?.includes(p.institution)).length}명`);
       
-      let basicEducationStatus = '미이수';
-      let advancedEducationStatus = '미이수';
-      
-      if (participantMatch) {
-        // 기초교육 상태
-        if (participantMatch.basicTraining === '완료' || participantMatch.basicTraining === '수료' || participantMatch.finalCompletion === '수료') {
-          basicEducationStatus = '수료';
-        } else if (participantMatch.basicTraining && participantMatch.basicTraining !== '미이수') {
-          basicEducationStatus = participantMatch.basicTraining;
-        }
-        
-        // 심화교육 상태
-        if (participantMatch.advancedEducation === '완료' || participantMatch.advancedEducation === '수료') {
-          advancedEducationStatus = '수료';
-        } else if (participantMatch.advancedEducation && participantMatch.advancedEducation !== '미이수') {
-          advancedEducationStatus = participantMatch.advancedEducation;
-        }
+      if (institutionParticipants.length > 0) {
+        console.log('- 첫 3명 샘플:');
+        institutionParticipants.slice(0, 3).forEach(p => {
+          console.log(`  * ${p.name} (기관: "${p.institution}", 기본교육: "${p.basicEducationStatus || p.basicTraining || 'null'}", 심화교육: "${p.advancedEducationStatus || p.advancedEducation || 'null'}")`);
+        });
       }
+    }
+    
+    // 소속회원 데이터를 직접 사용하여 교육 상태 표시
+    return institutionParticipants.map(participant => {
+      // 기초교육 상태 확인
+      const basicEducationStatus = 
+        (participant.basicEducationStatus === '수료' || participant.basicEducationStatus === '완료' ||
+         participant.basicTraining === '수료' || participant.basicTraining === '완료') 
+          ? '수료' 
+          : participant.basicEducationStatus || participant.basicTraining || '미이수';
+      
+      // 심화교육 상태 확인
+      const advancedEducationStatus = 
+        (participant.advancedEducationStatus === '수료' || participant.advancedEducationStatus === '완료' ||
+         participant.advancedEducation === '수료' || participant.advancedEducation === '완료') 
+          ? '수료' 
+          : participant.advancedEducationStatus || participant.advancedEducation || '미이수';
       
       return {
-        ...employee,
+        name: participant.name,
+        jobType: participant.jobType || '미분류',
+        hireDate: participant.hireDate || '미등록',
+        resignDate: participant.resignDate,
+        institution: participant.institution,
+        isActive: participant.status === '정상' && !participant.resignDate,
         basicEducationStatus,
         advancedEducationStatus,
         isFullyCompleted: basicEducationStatus === '수료' && advancedEducationStatus === '수료'
       };
     });
-  };
+  }, [participantBasedStats]);
 
-  // 직군별 통계 계산 (중복 제거)
-  const getJobTypeStats = (educationType: 'basic' | 'advanced') => {
-    const rawData = educationType === 'basic' ? basicEducationData : advancedEducationData;
-    const data = filterByRetirement(rawData);
-    
-    // 직군별로 그룹화
-    const jobTypeGroups = data.reduce((acc, item) => {
-      const jobType = item.jobType || '기타';
+  // 소속회원 기준 직군별 통계 계산 - useCallback으로 최적화
+  const getJobTypeStats = useCallback((educationType: 'basic' | 'advanced') => {
+    if (!participantBasedStats.activeParticipants || participantBasedStats.activeParticipants.length === 0) {
+      return [];
+    }
+
+    // 소속회원들을 직군별로 그룹화
+    const jobTypeGroups = participantBasedStats.activeParticipants.reduce((acc, participant) => {
+      const jobType = participant.jobType || '기타';
       if (!acc[jobType]) {
         acc[jobType] = [];
       }
-      acc[jobType].push(item);
+      acc[jobType].push(participant);
       return acc;
-    }, {} as Record<string, typeof data>);
+    }, {} as Record<string, typeof participantBasedStats.activeParticipants>);
 
-    // 각 직군별로 고유한 사람 기준으로 통계 계산
-    return Object.entries(jobTypeGroups).map(([jobType, items]) => {
-      // 동일한 사람(이름+ID)으로 그룹화
-      const personGroups = items.reduce((acc, item) => {
-        const personKey = `${item.name}_${item.id}`;
-        if (!acc[personKey]) {
-          acc[personKey] = {
-            person: { name: item.name, id: item.id, jobType: item.jobType },
-            courses: []
-          };
+    // 각 직군별로 통계 계산
+    return Object.entries(jobTypeGroups).map(([jobType, participants]) => {
+      const total = participants.length;
+      
+      let completed = 0;
+      let inProgress = 0;
+      let cancelled = 0;
+
+
+      participants.forEach(participant => {
+        if (educationType === 'basic') {
+          // 기본교육 상태 확인
+          const isCompleted = participant.basicEducationStatus === '수료' || 
+                            participant.basicEducationStatus === '완료' ||
+                            participant.basicTraining === '수료' ||
+                            participant.basicTraining === '완료';
+          
+          const isCancelled = 
+            (participant.basicEducationStatus && 
+             (participant.basicEducationStatus.includes('취소') || 
+              participant.basicEducationStatus.includes('중단') ||
+              participant.basicEducationStatus === '수강취소')) ||
+            (participant.basicTraining && 
+             (participant.basicTraining.includes('취소') || 
+              participant.basicTraining.includes('중단') ||
+              participant.basicTraining === '수강취소')) ||
+            (participant.status && 
+             (participant.status.includes('취소') || 
+              participant.status.includes('중단')));
+          
+          const isInProgress = !isCompleted && !isCancelled && 
+                             (participant.basicEducationStatus || participant.basicTraining);
+
+          if (isCompleted) completed++;
+          else if (isCancelled) cancelled++;
+          else if (isInProgress) inProgress++;
+        } else {
+          // 심화교육 상태 확인
+          const isCompleted = participant.advancedEducationStatus === '수료' || 
+                            participant.advancedEducationStatus === '완료' ||
+                            participant.advancedEducation === '수료' ||
+                            participant.advancedEducation === '완료';
+          
+          const isCancelled = 
+            (participant.advancedEducationStatus && 
+             (participant.advancedEducationStatus.includes('취소') || 
+              participant.advancedEducationStatus.includes('중단') ||
+              participant.advancedEducationStatus === '수강취소')) ||
+            (participant.advancedEducation && 
+             (participant.advancedEducation.includes('취소') || 
+              participant.advancedEducation.includes('중단') ||
+              participant.advancedEducation === '수강취소')) ||
+            (participant.status && 
+             (participant.status.includes('취소') || 
+              participant.status.includes('중단')));
+          
+          const isInProgress = !isCompleted && !isCancelled && 
+                             (participant.advancedEducationStatus || participant.advancedEducation);
+
+          if (isCompleted) completed++;
+          else if (isCancelled) cancelled++;
+          else if (isInProgress) inProgress++;
         }
-        acc[personKey].courses.push(item);
-        return acc;
-      }, {} as Record<string, { person: any; courses: typeof items }>);
-
-      const uniquePersons = Object.values(personGroups);
-      const total = uniquePersons.length;
-
-      // 각 사람별로 수료 상태 판단
-      const personStats = uniquePersons.map(({ courses }) => {
-        const hasCompleted = courses.some(course => course.status === '수료');
-        const hasCancelled = courses.some(course => course.rawStatus === '수강취소');
-        const hasInProgress = courses.some(course => course.rawStatus === '정상' && course.status !== '수료');
-        
-        return {
-          isCompleted: hasCompleted,
-          isCancelled: hasCancelled && !hasCompleted,
-          isInProgress: hasInProgress && !hasCompleted
-        };
       });
 
-      const completed = personStats.filter(p => p.isCompleted).length;
-      const cancelled = personStats.filter(p => p.isCancelled).length;
-      const inProgress = personStats.filter(p => p.isInProgress).length;
 
       return {
         jobType,
@@ -140,117 +249,174 @@ export default function EducationStatsPage() {
         cancelled,
         completionRate: total > 0 ? Math.round((completed / total) * 100) : 0
       };
-    });
-  };
+    }).filter(stat => stat.total > 0); // 참여자가 있는 직군만 반환
+  }, [participantBasedStats]);
 
-  // 기관별 성과 분석 (중복 제거)
-  const getInstitutionPerformance = (criteriaRate: number = 80) => {
-    const rawAllData = [...basicEducationData, ...advancedEducationData];
-    const allData = filterByRetirement(rawAllData);
+  // 소속회원 기준 기관별 성과 분석 (폐지/종료 기관 제외) - useCallback으로 최적화
+  const getInstitutionPerformance = useCallback((criteriaRate: number = 80) => {
+    if (!participantBasedStats.activeParticipants || participantBasedStats.activeParticipants.length === 0) {
+      return [];
+    }
     
-    // 기관별로 그룹화
-    const institutionGroups = allData.reduce((acc, item) => {
-      const institution = item.institution;
+    // 폐지/종료 기관 식별 키워드
+    const closedInstitutionKeywords = [
+      '폐지', '종료', '폐쇄', '해산', '해체', '중단', '운영중단', '운영종료',
+      '폐원', '휴원', '휴업', '운영휴지', '사업중단', '사업종료', 
+      'closed', 'terminated', 'discontinued', 'shutdown'
+    ];
+    
+    // 폐지/종료된 기관인지 확인하는 함수
+    const isClosedInstitution = (institutionName: string, participants: any[]) => {
+      // 기관명에 폐지/종료 키워드가 포함된 경우
+      const nameCheck = closedInstitutionKeywords.some(keyword => 
+        institutionName?.toLowerCase().includes(keyword.toLowerCase())
+      );
+      
+      // 해당 기관의 모든 소속회원이 비활성 상태인 경우 (폐지 추정)
+      const allInactive = participants.length > 0 && 
+        participants.every(p => 
+          p.status !== '정상' || 
+          p.isActive === false ||
+          (p.resignDate && new Date(p.resignDate) < new Date())
+        );
+      
+      return nameCheck || allInactive;
+    };
+    
+    // 소속회원을 기관별로 그룹화
+    const institutionGroups = participantBasedStats.activeParticipants.reduce((acc, participant) => {
+      const institution = participant.institution;
       if (!acc[institution]) {
         acc[institution] = {
           name: institution,
-          district: item.district,
-          items: []
+          district: participant.district,
+          participants: []
         };
       }
-      acc[institution].items.push(item);
+      acc[institution].participants.push(participant);
       return acc;
-    }, {} as Record<string, { name: string; district: string; items: typeof allData }>);
+    }, {} as Record<string, { name: string; district: string; participants: typeof participantBasedStats.activeParticipants }>);
 
-    return Object.values(institutionGroups).map(({ name, district, items }) => {
-      // 동일한 사람(이름+ID)으로 그룹화
-      const personGroups = items.reduce((acc, item) => {
-        const personKey = `${item.name}_${item.id}`;
-        if (!acc[personKey]) {
-          acc[personKey] = {
-            person: { name: item.name, id: item.id, jobType: item.jobType },
-            basicCourses: [],
-            advancedCourses: []
-          };
-        }
+    return Object.values(institutionGroups)
+      .filter(({ name, participants }) => {
+        // 폐지/종료된 기관 제외
+        return !isClosedInstitution(name, participants);
+      })
+      .map(({ name, district, participants }) => {
+        const total = participants.length;
         
-        if (item.courseType === '기본' || item.course.includes('기본교육')) {
-          acc[personKey].basicCourses.push(item);
-        } else {
-          acc[personKey].advancedCourses.push(item);
+        // 광역지원기관 및 우리들노인통합지원센터 디버깅
+        if (name?.includes('광역') || name?.includes('경상남도사회서비스원') || 
+            name?.includes('우리들') || name?.includes('노인통합지원센터')) {
+          console.log(`\n🏥 [${name}] 기관성과 분석 디버깅:`);
+          console.log('- 총 소속회원:', total, '명');
+          console.log('- 기관명 정확한 매칭:', name);
+          console.log('- district:', district);
+          console.log('- 첫 5명 샘플:', participants.slice(0, 5).map(p => ({
+            name: p.name,
+            institution: p.institution,
+            basicEducationStatus: p.basicEducationStatus,
+            basicTraining: p.basicTraining,
+            advancedEducationStatus: p.advancedEducationStatus,
+            advancedEducation: p.advancedEducation,
+            status: p.status
+          })));
         }
-        return acc;
-      }, {} as Record<string, { person: any; basicCourses: typeof items; advancedCourses: typeof items }>);
 
-      const uniquePersons = Object.values(personGroups);
-      const total = uniquePersons.length;
+        // 소속회원별 수료 상태 계산 (통일된 로직 사용)
+        let completed = 0;
+        let basicCompleted = 0;
+        let advancedCompleted = 0;
+        let basicTotal = total; // 모든 소속회원이 기본교육 대상
+        let advancedTotal = total; // 모든 소속회원이 심화교육 대상
 
-      // 사람별 수료 상태 계산
-      let completed = 0;
-      let basicCompleted = 0;
-      let advancedCompleted = 0;
-      let basicTotal = 0;
-      let advancedTotal = 0;
+        const jobTypeStats = {} as Record<string, { total: number; completed: number }>;
 
-      const jobTypeStats = {} as Record<string, { total: number; completed: number }>;
+        participants.forEach(participant => {
+          const jobType = participant.jobType || '기타';
+          if (!jobTypeStats[jobType]) {
+            jobTypeStats[jobType] = { total: 0, completed: 0 };
+          }
+          jobTypeStats[jobType].total++;
 
-      uniquePersons.forEach(({ person, basicCourses, advancedCourses }) => {
-        const jobType = person.jobType || '기타';
-        if (!jobTypeStats[jobType]) {
-          jobTypeStats[jobType] = { total: 0, completed: 0 };
-        }
-        jobTypeStats[jobType].total++;
-
-        const hasBasicCompleted = basicCourses.some(course => course.status === '수료');
-        const hasAdvancedCompleted = advancedCourses.some(course => course.status === '수료');
-        
-        if (basicCourses.length > 0) {
-          basicTotal++;
+          // 🎯 통일된 수료 판정 로직 - 상세보기와 동일하게
+          const hasBasicCompleted = 
+            participant.basicEducationStatus === '수료' || 
+            participant.basicEducationStatus === '완료' ||
+            participant.basicTraining === '수료' ||
+            participant.basicTraining === '완료';
+          
+          const hasAdvancedCompleted = 
+            participant.advancedEducationStatus === '수료' || 
+            participant.advancedEducationStatus === '완료' ||
+            participant.advancedEducation === '수료' ||
+            participant.advancedEducation === '완료';
+          
           if (hasBasicCompleted) {
             basicCompleted++;
           }
-        }
-        
-        if (advancedCourses.length > 0) {
-          advancedTotal++;
+          
           if (hasAdvancedCompleted) {
             advancedCompleted++;
           }
+
+          // 전체 수료 여부 (기본 또는 심화 중 하나라도 수료)
+          if (hasBasicCompleted || hasAdvancedCompleted) {
+            completed++;
+            jobTypeStats[jobType].completed++;
+          }
+          
+          // 광역지원기관 및 우리들노인통합지원센터 개별 회원 디버깅
+          if ((name?.includes('광역') || name?.includes('경상남도사회서비스원') || 
+               name?.includes('우리들')) && (hasBasicCompleted || hasAdvancedCompleted)) {
+            console.log(`  ✅ 수료자: ${participant.name} (기본:${hasBasicCompleted ? 'O' : 'X'}, 심화:${hasAdvancedCompleted ? 'O' : 'X'})`);
+          }
+          
+          // 광역지원기관에서 수료 상태가 없는 회원들도 디버깅
+          if ((name?.includes('광역') || name?.includes('경상남도사회서비스원')) && !hasBasicCompleted && !hasAdvancedCompleted) {
+            console.log(`  ❌ 미수료자: ${participant.name} - basic: "${participant.basicEducationStatus || participant.basicTraining || 'null'}", advanced: "${participant.advancedEducationStatus || participant.advancedEducation || 'null'}"`);
+          }
+        });
+
+        const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+        const basicCompletionRate = basicTotal > 0 ? Math.round((basicCompleted / basicTotal) * 100) : 0;
+        const advancedCompletionRate = advancedTotal > 0 ? Math.round((advancedCompleted / advancedTotal) * 100) : 0;
+        
+        // 광역지원기관 및 우리들노인통합지원센터 최종 결과 디버깅
+        if (name?.includes('광역') || name?.includes('경상남도사회서비스원') || 
+            name?.includes('우리들') || name?.includes('노인통합지원센터')) {
+          console.log(`📊 [${name}] 최종 통계:`);
+          console.log(`- 전체: ${total}명, 수료: ${completed}명, 수료율: ${completionRate}%`);
+          console.log(`- 기본교육: ${basicCompleted}/${basicTotal} (${basicCompletionRate}%)`);
+          console.log(`- 심화교육: ${advancedCompleted}/${advancedTotal} (${advancedCompletionRate}%)`);
+          
+          if (completionRate < 20) {
+            console.log('⚠️ 수료율이 비정상적으로 낮습니다. 데이터 확인 필요!');
+          }
         }
 
-        // 전체 수료 여부 (기본 또는 심화 중 하나라도 수료)
-        if (hasBasicCompleted || hasAdvancedCompleted) {
-          completed++;
-          jobTypeStats[jobType].completed++;
-        }
+        return {
+          name,
+          district,
+          total,
+          completed,
+          basic: { total: basicTotal, completed: basicCompleted },
+          advanced: { total: advancedTotal, completed: advancedCompleted },
+          jobTypes: jobTypeStats,
+          completionRate,
+          basicCompletionRate,
+          advancedCompletionRate,
+          size: total < 10 ? 'small' : total < 50 ? 'medium' : 'large',
+          isExcellent: total > 0 && completionRate >= criteriaRate
+        };
       });
-
-      const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
-      const basicCompletionRate = basicTotal > 0 ? Math.round((basicCompleted / basicTotal) * 100) : 0;
-      const advancedCompletionRate = advancedTotal > 0 ? Math.round((advancedCompleted / advancedTotal) * 100) : 0;
-
-      return {
-        name,
-        district,
-        total,
-        completed,
-        basic: { total: basicTotal, completed: basicCompleted },
-        advanced: { total: advancedTotal, completed: advancedCompleted },
-        jobTypes: jobTypeStats,
-        completionRate,
-        basicCompletionRate,
-        advancedCompletionRate,
-        size: total < 10 ? 'small' : total < 50 ? 'medium' : 'large',
-        isExcellent: total > 0 && completionRate >= criteriaRate
-      };
-    });
-  };
+  }, [participantBasedStats]);
 
   const [performanceCriteria, setPerformanceCriteria] = useState(80);
   const [includeRetired, setIncludeRetired] = useState(false);
   
-  // 퇴직자 필터링 함수
-  const filterByRetirement = (data: any[]) => {
+  // 퇴직자 필터링 함수 - useCallback으로 최적화
+  const filterByRetirement = useCallback((data: any[]) => {
     if (includeRetired) {
       return data; // 퇴직자 포함
     }
@@ -281,10 +447,10 @@ export default function EducationStatsPage() {
     });
     
     return filtered;
-  };
+  }, [includeRetired, employeeData]);
 
-  // 디버깅 정보
-  const debugInfo = {
+  // 디버깅 정보 - useMemo로 최적화
+  const debugInfo = useMemo(() => ({
     totalBasicEducation: basicEducationData.length,
     totalAdvancedEducation: advancedEducationData.length,
     totalParticipants: participantData.length,
@@ -296,36 +462,22 @@ export default function EducationStatsPage() {
     ).length,
     retiredEmployees: employeeData.filter(e => !e.isActive).length,
     activeEmployees: employeeData.filter(e => e.isActive).length
-  };
+  }), [basicEducationData, advancedEducationData, participantData, employeeData, filterByRetirement]);
 
-  const basicJobStats = getJobTypeStats('basic');
-  const advancedJobStats = getJobTypeStats('advanced');
-  const institutionPerformance = getInstitutionPerformance(performanceCriteria);
+  // 계산 결과들을 useMemo로 최적화
+  const basicJobStats = useMemo(() => getJobTypeStats('basic'), [getJobTypeStats]);
+  const advancedJobStats = useMemo(() => getJobTypeStats('advanced'), [getJobTypeStats]);
+  const institutionPerformance = useMemo(() => getInstitutionPerformance(performanceCriteria), [getInstitutionPerformance, performanceCriteria]);
   
-  const excellentInstitutions = institutionPerformance.filter(inst => inst.isExcellent);
-  const improvementNeeded = institutionPerformance.filter(inst => !inst.isExcellent && inst.total > 0);
+  const excellentInstitutions = useMemo(() => institutionPerformance.filter(inst => inst.isExcellent), [institutionPerformance]);
+  const improvementNeeded = useMemo(() => institutionPerformance.filter(inst => !inst.isExcellent && inst.total > 0), [institutionPerformance]);
 
-  // 배움터 등록기준 분석 함수 (재직자만)
-  const getLearningPlatformStats = () => {
+  // 배움터 등록기준 분석 함수 (재직자만) - useMemo로 최적화
+  const getLearningPlatformStats = useMemo(() => {
     const { institutionData } = useEmployeeStore.getState();
     
-    // 재직자만 필터링
-    const activeParticipants = participantData.filter(participant => {
-      // isActive가 true이거나
-      if (participant.isActive) return true;
-      
-      // 퇴사일이 없거나 미래 날짜인 경우
-      if (!participant.resignDate) return true;
-      
-      try {
-        const resignDate = new Date(participant.resignDate);
-        const today = new Date();
-        return resignDate > today;
-      } catch {
-        // 날짜 파싱 실패시 재직자로 간주
-        return true;
-      }
-    });
+    // 🎯 통일된 활성 참가자 데이터 사용 (다른 분석과 동일)
+    const activeParticipants = participantBasedStats.activeParticipants || [];
     
     // 기관별 분석 데이터 생성
     const institutionStats = (institutionData || []).map(institution => {
@@ -336,26 +488,62 @@ export default function EducationStatsPage() {
         p.institution === institution.name
       );
       
-      // 직무별 대상인원 (배움터 등록기준)
-      const targetTotal = institutionParticipants.length;
-      const targetSocial = institutionParticipants.filter(p => 
+      // 광역지원기관 특별 처리 (중복 제거)
+      const uniqueParticipants = institutionParticipants.filter((participant, index, self) => {
+        // 이름과 주민번호로 중복 체크
+        return index === self.findIndex(p => 
+          p.name === participant.name && 
+          (p.residentId === participant.residentId || (!p.residentId && !participant.residentId))
+        );
+      });
+      
+      // 직무별 대상인원 (배움터 등록기준) - 중복 제거된 데이터 사용
+      const targetSocial = uniqueParticipants.filter(p => 
         p.jobType?.includes('전담') || p.jobType === '전담사회복지사'
       ).length;
-      const targetLife = institutionParticipants.filter(p => 
+      const targetLife = uniqueParticipants.filter(p => 
         p.jobType?.includes('생활지원') || p.jobType === '생활지원사'
       ).length;
       
-      // 교육 이수인원 (배움터 등록기준)
-      const completedTotal = institutionParticipants.filter(p => 
-        p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료'
+      // 전체 대상인원은 전담사회복지사 + 생활지원사의 합
+      const targetTotal = targetSocial + targetLife;
+      
+      // 교육 이수인원 (배움터 등록기준) - 중복 제거된 데이터 사용
+      // 광역지원기관 디버깅
+      if (institution.name?.includes('광역') || institution.code === 'A48000002') {
+        console.log(`🔍 [${institution.name}] 이수인원 계산 디버깅:`);
+        console.log('- 참가자 데이터:', uniqueParticipants);
+        uniqueParticipants.forEach(p => {
+          console.log(`  - ${p.name}: basicTraining=${p.basicTraining}, finalCompletion=${p.finalCompletion}, status=${p.status}`);
+        });
+      }
+      
+      // 🎯 통일된 수료 판정 함수 - 기관성과 분석과 동일하게
+      const isCompleted = (participant: any) => {
+        // 기본교육 수료 확인
+        const hasBasicCompleted = 
+          participant.basicEducationStatus === '수료' || 
+          participant.basicEducationStatus === '완료' ||
+          participant.basicTraining === '수료' ||
+          participant.basicTraining === '완료';
+        
+        // 심화교육 수료 확인  
+        const hasAdvancedCompleted = 
+          participant.advancedEducationStatus === '수료' || 
+          participant.advancedEducationStatus === '완료' ||
+          participant.advancedEducation === '수료' ||
+          participant.advancedEducation === '완료';
+        
+        // 기본교육 또는 심화교육 중 하나라도 수료하면 완료로 간주
+        return hasBasicCompleted || hasAdvancedCompleted;
+      };
+      
+      const completedTotal = uniqueParticipants.filter(isCompleted).length;
+      const completedSocial = uniqueParticipants.filter(p => 
+        isCompleted(p) && (p.jobType?.includes('전담') || p.jobType === '전담사회복지사')
       ).length;
-      const completedSocial = institutionParticipants.filter(p => 
-        (p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료') &&
-        (p.jobType?.includes('전담') || p.jobType === '전담사회복지사')
-      ).length;
-      const completedLife = institutionParticipants.filter(p => 
-        (p.basicTraining === '완료' || p.basicTraining === '수료' || p.finalCompletion === '수료') &&
-        (p.jobType?.includes('생활지원') || p.jobType === '생활지원사')
+      const completedLife = uniqueParticipants.filter(p => 
+        isCompleted(p) && (p.jobType?.includes('생활지원') || p.jobType === '생활지원사')
       ).length;
       
       // 이수율 계산
@@ -383,9 +571,9 @@ export default function EducationStatsPage() {
     }).filter(inst => inst.targetTotal > 0); // 대상인원이 있는 기관만
     
     return institutionStats;
-  };
+  }, [participantBasedStats]);
 
-  const learningPlatformStats = getLearningPlatformStats();
+  const learningPlatformStats = getLearningPlatformStats;
 
   // 파이 차트 색상 정의
   const COLORS = {
@@ -395,43 +583,98 @@ export default function EducationStatsPage() {
     none: '#ef4444'         // 빨간색 - 미수료
   };
 
-  // 전체 수료 현황 데이터
+  // 소속회원 기준 수료 현황 데이터
   const completionData = [
-    { name: '완전수료', value: summaryStats.complete, color: COLORS.complete },
-    { name: '부분수료', value: summaryStats.partial, color: COLORS.partial },
-    { name: '진행중', value: summaryStats.inProgress, color: COLORS.inProgress },
-    { name: '미수료', value: summaryStats.none, color: COLORS.none },
+    { name: '완전수료', value: participantBasedStats.stats.complete, color: COLORS.complete },
+    { name: '부분수료', value: participantBasedStats.stats.partial, color: COLORS.partial },
+    { name: '진행중', value: participantBasedStats.stats.inProgress, color: COLORS.inProgress },
+    { name: '미수료', value: participantBasedStats.stats.none, color: COLORS.none },
   ];
 
-  // 과정별 통계 데이터 (기본교육)
-  const basicCourseData = Object.entries(educationStats.basicStats.courseStats || {}).map(([course, stats]) => ({
-    course,
-    participants: stats.count,
-    completionRate: stats.completionRate
-  }));
-
-  // 과정별 통계 데이터 (심화교육)
-  const advancedCourseData = Object.entries(educationStats.advancedStats.courseStats || {}).map(([course, stats]) => ({
-    course,
-    participants: stats.count,
-    completionRate: stats.completionRate
-  }));
-
-  // 교육 유형별 비교 데이터
-  const comparisonData = [
-    {
-      type: '기본교육',
-      total: educationStats.basicStats.totalParticipants,
-      completed: educationStats.basicStats.completedCount,
-      rate: educationStats.basicStats.completionRate
-    },
-    {
-      type: '심화교육',
-      total: educationStats.advancedStats.totalParticipants,
-      completed: educationStats.advancedStats.completedCount,
-      rate: educationStats.advancedStats.completionRate
+  // 소속회원 기준 과정별 통계 데이터 (기본교육)
+  const basicCourseData = useMemo(() => {
+    if (!participantBasedStats.activeParticipants || participantBasedStats.activeParticipants.length === 0) {
+      return [];
     }
-  ];
+    
+    // 소속회원들의 기본교육 과정별 통계 생성
+    const courseStats = participantBasedStats.activeParticipants.reduce((acc, participant) => {
+      const course = participant.basicCourse || '기본교육 과정';
+      if (!acc[course]) {
+        acc[course] = { total: 0, completed: 0 };
+      }
+      acc[course].total++;
+      if (participant.basicEducationStatus === '수료' || participant.basicEducationStatus === '완료' ||
+          participant.basicTraining === '수료' || participant.basicTraining === '완료') {
+        acc[course].completed++;
+      }
+      return acc;
+    }, {} as Record<string, {total: number, completed: number}>);
+    
+    return Object.entries(courseStats).map(([course, stats]) => ({
+      course,
+      participants: stats.total,
+      completionRate: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0
+    }));
+  }, [participantBasedStats]);
+
+  // 소속회원 기준 과정별 통계 데이터 (심화교육)
+  const advancedCourseData = useMemo(() => {
+    if (!participantBasedStats.activeParticipants || participantBasedStats.activeParticipants.length === 0) {
+      return [];
+    }
+    
+    // 소속회원들의 심화교육 과정별 통계 생성
+    const courseStats = participantBasedStats.activeParticipants.reduce((acc, participant) => {
+      const course = participant.advancedCourse || '심화교육 과정';
+      if (!acc[course]) {
+        acc[course] = { total: 0, completed: 0 };
+      }
+      acc[course].total++;
+      if (participant.advancedEducationStatus === '수료' || participant.advancedEducationStatus === '완료' ||
+          participant.advancedEducation === '수료' || participant.advancedEducation === '완료') {
+        acc[course].completed++;
+      }
+      return acc;
+    }, {} as Record<string, {total: number, completed: number}>);
+    
+    return Object.entries(courseStats).map(([course, stats]) => ({
+      course,
+      participants: stats.total,
+      completionRate: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0
+    }));
+  }, [participantBasedStats]);
+
+  // 소속회원 기준 교육 유형별 비교 데이터
+  const comparisonData = useMemo(() => {
+    const basicCompleted = participantBasedStats.activeParticipants.filter(p =>
+      p.basicEducationStatus === '수료' || p.basicEducationStatus === '완료' ||
+      p.basicTraining === '수료' || p.basicTraining === '완료'
+    ).length;
+    
+    const advancedCompleted = participantBasedStats.activeParticipants.filter(p =>
+      p.advancedEducationStatus === '수료' || p.advancedEducationStatus === '완료' ||
+      p.advancedEducation === '수료' || p.advancedEducation === '완료'
+    ).length;
+    
+    const basicRate = participantBasedStats.stats.total > 0 ? Math.round((basicCompleted / participantBasedStats.stats.total) * 100) : 0;
+    const advancedRate = participantBasedStats.stats.total > 0 ? Math.round((advancedCompleted / participantBasedStats.stats.total) * 100) : 0;
+    
+    return [
+      {
+        type: '기본교육',
+        total: participantBasedStats.stats.total,
+        completed: basicCompleted,
+        rate: basicRate
+      },
+      {
+        type: '심화교육', 
+        total: participantBasedStats.stats.total,
+        completed: advancedCompleted,
+        rate: advancedRate
+      }
+    ];
+  }, [participantBasedStats]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -486,15 +729,13 @@ export default function EducationStatsPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {filterByRetirement([...basicEducationData, ...advancedEducationData])
-                  .reduce((acc, item) => {
-                    const personKey = `${item.name}_${item.id}`;
-                    acc.add(personKey);
-                    return acc;
-                  }, new Set()).size}명
+                {participantBasedStats.stats.total}명
               </div>
               <p className="text-xs text-blue-100">
-                {includeRetired ? '퇴직자 포함' : '현직자만'} 고유 인원
+                소속회원 기준 재직자 ('정상' 상태만)
+              </p>
+              <p className="text-xs text-blue-200 mt-1">
+                전체: {participantBasedStats.totalCount}명 → 재직자: {participantBasedStats.stats.total}명
               </p>
             </CardContent>
           </Card>
@@ -507,20 +748,23 @@ export default function EducationStatsPage() {
             <CardContent>
               <div className="text-2xl font-bold">
                 {(() => {
-                  const filteredData = filterByRetirement(basicEducationData);
-                  const personGroups = filteredData.reduce((acc, item) => {
-                    const personKey = `${item.name}_${item.id}`;
-                    if (!acc[personKey]) acc[personKey] = [];
-                    acc[personKey].push(item);
-                    return acc;
-                  }, {});
-                  return Object.values(personGroups).filter((courses: any) => 
-                    courses.some((course: any) => course.status === '수료')
+                  const basicCompleted = participantBasedStats.activeParticipants.filter(p =>
+                    p.basicEducationStatus === '수료' || 
+                    p.basicEducationStatus === '완료' ||
+                    p.basicTraining === '수료' ||
+                    p.basicTraining === '완료'
                   ).length;
+                  return basicCompleted;
                 })()}명
               </div>
               <p className="text-xs text-green-100">
-                수료율: {basicJobStats.find(s => s.jobType === '전담사회복지사')?.completionRate || 0}%
+                기본교육 수료율: {participantBasedStats.stats.total > 0 ? 
+                  Math.round((participantBasedStats.activeParticipants.filter(p =>
+                    p.basicEducationStatus === '수료' || 
+                    p.basicEducationStatus === '완료' ||
+                    p.basicTraining === '수료' ||
+                    p.basicTraining === '완료'
+                  ).length / participantBasedStats.stats.total) * 100) : 0}%
               </p>
             </CardContent>
           </Card>
@@ -533,20 +777,23 @@ export default function EducationStatsPage() {
             <CardContent>
               <div className="text-2xl font-bold">
                 {(() => {
-                  const filteredData = filterByRetirement(advancedEducationData);
-                  const personGroups = filteredData.reduce((acc, item) => {
-                    const personKey = `${item.name}_${item.id}`;
-                    if (!acc[personKey]) acc[personKey] = [];
-                    acc[personKey].push(item);
-                    return acc;
-                  }, {});
-                  return Object.values(personGroups).filter((courses: any) => 
-                    courses.some((course: any) => course.status === '수료')
+                  const advancedCompleted = participantBasedStats.activeParticipants.filter(p =>
+                    p.advancedEducationStatus === '수료' || 
+                    p.advancedEducationStatus === '완료' ||
+                    p.advancedEducation === '수료' ||
+                    p.advancedEducation === '완료'
                   ).length;
+                  return advancedCompleted;
                 })()}명
               </div>
               <p className="text-xs text-purple-100">
-                수료율: {advancedJobStats.find(s => s.jobType === '전담사회복지사')?.completionRate || 0}%
+                심화교육 수료율: {participantBasedStats.stats.total > 0 ? 
+                  Math.round((participantBasedStats.activeParticipants.filter(p =>
+                    p.advancedEducationStatus === '수료' || 
+                    p.advancedEducationStatus === '완료' ||
+                    p.advancedEducation === '수료' ||
+                    p.advancedEducation === '완료'
+                  ).length / participantBasedStats.stats.total) * 100) : 0}%
               </p>
             </CardContent>
           </Card>
@@ -559,30 +806,35 @@ export default function EducationStatsPage() {
             <CardContent>
               <div className="text-2xl font-bold">
                 {(() => {
-                  const allFilteredData = filterByRetirement([...basicEducationData, ...advancedEducationData]);
-                  const personGroups = allFilteredData.reduce((acc, item) => {
-                    const personKey = `${item.name}_${item.id}`;
-                    if (!acc[personKey]) acc[personKey] = [];
-                    acc[personKey].push(item);
-                    return acc;
-                  }, {});
+                  // 소속회원 기준 전체 수료율 계산 (기본교육 또는 심화교육 중 하나라도 수료한 경우)
+                  if (participantBasedStats.stats.total === 0) return 0;
                   
-                  const uniquePersons = Object.values(personGroups);
-                  const totalCompleted = uniquePersons.filter((courses: any) => 
-                    courses.some((course: any) => course.status === '수료')
-                  ).length;
+                  const anyEducationCompleted = participantBasedStats.activeParticipants.filter(p => {
+                    const basicCompleted = p.basicEducationStatus === '수료' || 
+                                          p.basicEducationStatus === '완료' ||
+                                          p.basicTraining === '수료' ||
+                                          p.basicTraining === '완료';
+                    const advancedCompleted = p.advancedEducationStatus === '수료' || 
+                                             p.advancedEducationStatus === '완료' ||
+                                             p.advancedEducation === '수료' ||
+                                             p.advancedEducation === '완료';
+                    return basicCompleted || advancedCompleted;
+                  }).length;
                   
-                  return uniquePersons.length > 0 ? Math.round((totalCompleted / uniquePersons.length) * 100) : 0;
+                  return Math.round((anyEducationCompleted / participantBasedStats.stats.total) * 100);
                 })()}%
               </div>
               <p className="text-xs text-indigo-100">
-                {includeRetired ? '퇴직자 포함' : '현직자만'} 통합 수료율
+                소속회원 기준 전체 수료율 (기본 또는 심화 중 1개 이상)
+              </p>
+              <p className="text-xs text-indigo-200 mt-1">
+                대상: {participantBasedStats.stats.total}명 ('정상' 상태 재직자만)
               </p>
             </CardContent>
           </Card>
         </div>
 
-        {/* 교육별 상세 통계 */}
+        {/* 교육별 상세 통계 (소속회원 기준) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card>
             <CardHeader>
@@ -590,21 +842,39 @@ export default function EducationStatsPage() {
                 <BookOpen className="h-5 w-5 text-blue-600" />
                 기본교육 현황
               </CardTitle>
-              <CardDescription>기본교육 참여 및 수료 통계</CardDescription>
+              <CardDescription>소속회원 기준 기본교육 참여 및 수료 통계</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium">전체 참여자</span>
-                  <Badge variant="outline">{educationStats.basicStats.totalParticipants}명</Badge>
+                  <span className="text-sm font-medium">전체 대상자</span>
+                  <Badge variant="outline">{participantBasedStats.stats.total}명</Badge>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">수료자</span>
-                  <Badge className="bg-green-100 text-green-800">{educationStats.basicStats.completedCount}명</Badge>
+                  <Badge className="bg-green-100 text-green-800">
+                    {(() => {
+                      const basicCompleted = participantBasedStats.activeParticipants.filter(p =>
+                        p.basicEducationStatus === '수료' || 
+                        p.basicEducationStatus === '완료' ||
+                        p.basicTraining === '수료' ||
+                        p.basicTraining === '완료'
+                      ).length;
+                      return basicCompleted;
+                    })()}명
+                  </Badge>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">수료율</span>
-                  <Badge className="bg-blue-100 text-blue-800">{educationStats.basicStats.completionRate}%</Badge>
+                  <Badge className="bg-blue-100 text-blue-800">
+                    {participantBasedStats.stats.total > 0 ? 
+                      Math.round((participantBasedStats.activeParticipants.filter(p =>
+                        p.basicEducationStatus === '수료' || 
+                        p.basicEducationStatus === '완료' ||
+                        p.basicTraining === '수료' ||
+                        p.basicTraining === '완료'
+                      ).length / participantBasedStats.stats.total) * 100) : 0}%
+                  </Badge>
                 </div>
               </div>
             </CardContent>
@@ -616,21 +886,39 @@ export default function EducationStatsPage() {
                 <GraduationCap className="h-5 w-5 text-purple-600" />
                 심화교육 현황
               </CardTitle>
-              <CardDescription>심화교육 참여 및 수료 통계</CardDescription>
+              <CardDescription>소속회원 기준 심화교육 참여 및 수료 통계</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium">전체 참여자</span>
-                  <Badge variant="outline">{educationStats.advancedStats.totalParticipants}명</Badge>
+                  <span className="text-sm font-medium">전체 대상자</span>
+                  <Badge variant="outline">{participantBasedStats.stats.total}명</Badge>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">수료자</span>
-                  <Badge className="bg-green-100 text-green-800">{educationStats.advancedStats.completedCount}명</Badge>
+                  <Badge className="bg-green-100 text-green-800">
+                    {(() => {
+                      const advancedCompleted = participantBasedStats.activeParticipants.filter(p =>
+                        p.advancedEducationStatus === '수료' || 
+                        p.advancedEducationStatus === '완료' ||
+                        p.advancedEducation === '수료' ||
+                        p.advancedEducation === '완료'
+                      ).length;
+                      return advancedCompleted;
+                    })()}명
+                  </Badge>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-sm font-medium">수료율</span>
-                  <Badge className="bg-purple-100 text-purple-800">{educationStats.advancedStats.completionRate}%</Badge>
+                  <Badge className="bg-purple-100 text-purple-800">
+                    {participantBasedStats.stats.total > 0 ? 
+                      Math.round((participantBasedStats.activeParticipants.filter(p =>
+                        p.advancedEducationStatus === '수료' || 
+                        p.advancedEducationStatus === '완료' ||
+                        p.advancedEducation === '수료' ||
+                        p.advancedEducation === '완료'
+                      ).length / participantBasedStats.stats.total) * 100) : 0}%
+                  </Badge>
                 </div>
               </div>
             </CardContent>
@@ -796,7 +1084,13 @@ export default function EducationStatsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>기관 성과 분석 기준 설정</CardTitle>
-                <CardDescription>우수 기관과 개선 필요 기관을 구분할 수료율 기준을 설정하세요</CardDescription>
+                <CardDescription>
+                  우수 기관과 개선 필요 기관을 구분할 수료율 기준을 설정하세요
+                  <br />
+                  <span className="text-amber-600 text-sm">
+                    ⚠️ 폐지/종료된 기관은 자동으로 제외됩니다
+                  </span>
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center gap-4">
@@ -910,7 +1204,7 @@ export default function EducationStatsPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <CardTitle className="text-blue-800">🔍 {selectedInstitution} - 상세 현황</CardTitle>
-                        <CardDescription>소속 종사자 {employeeDetails.length}명의 교육 이수 현황</CardDescription>
+                        <CardDescription>소속 회원 {employeeDetails.length}명의 교육 이수 현황</CardDescription>
                       </div>
                       <button
                         onClick={() => setSelectedInstitution(null)}
@@ -947,7 +1241,7 @@ export default function EducationStatsPage() {
                     
                     {/* 직원 목록 */}
                     <div className="space-y-4">
-                      <h4 className="font-semibold text-gray-800">소속 종사자 목록</h4>
+                      <h4 className="font-semibold text-gray-800">소속 회원 목록</h4>
                       <div className="max-h-96 overflow-y-auto">
                         <div className="grid gap-2">
                           {employeeDetails.map((employee, idx) => (

@@ -28,6 +28,13 @@ import {
 } from "@/components/ui/table";
 import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
+import { 
+  createUnifiedDataSource, 
+  createEmployeeBasedStats,
+  createParticipantBasedStats,
+  calculateEducationStats,
+  getActivePersons 
+} from "@/utils/unified-data-source";
 
 export default function ParticipantsPage() {
   const [activeTab, setActiveTab] = useState('upload');
@@ -68,7 +75,9 @@ export default function ParticipantsPage() {
     loadLazyData,
     isLoaded,
     employeeData,
-    setEmployeeData
+    setEmployeeData,
+    basicEducationData,
+    advancedEducationData
   } = useEducationData();
 
   // 검색어 debounce 처리
@@ -80,21 +89,41 @@ export default function ParticipantsPage() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // 컴포넌트 마운트 시 참여자 데이터 로드
+  // 🔄 백그라운드에서 모든 데이터 미리 로드 (성능 최적화)
   useEffect(() => {
+    console.log('🚀 백그라운드 데이터 로딩 시작...');
+    
+    // 참가자 데이터 로드
     if (!isLoaded?.participant) {
-      console.log('🔄 Loading participant data...');
+      console.log('📊 참가자 데이터 로딩...');
       loadLazyData('participant');
     }
-  }, [isLoaded?.participant]); // loadLazyData 제거
-
-  // 데이터 불일치 분석 탭 접근 시 종사자 데이터 로드
-  useEffect(() => {
-    if (activeTab === 'inconsistencies' && !isLoaded?.employee) {
-      console.log('🔄 Loading employee data for inconsistency analysis...');
+    
+    // 종사자 데이터 로드 (불일치 분석용)
+    if (!isLoaded?.employee) {
+      console.log('👥 종사자 데이터 로딩 (불일치 분석용)...');
       loadLazyData('employee');
     }
-  }, [activeTab, isLoaded?.employee]);
+
+    // 교육 데이터도 미리 로드
+    if (!isLoaded?.basicEducation) {
+      console.log('📚 기초교육 데이터 로딩...');
+      loadLazyData('basic');
+    }
+    
+    if (!isLoaded?.advancedEducation) {
+      console.log('🎓 심화교육 데이터 로딩...');
+      loadLazyData('advanced');
+    }
+  }, []); // 컴포넌트 마운트 시 한 번만 실행
+
+  // 종사자 데이터 재로딩 체크 (데이터가 비어있는 경우)
+  useEffect(() => {
+    if (isLoaded?.employee && (!employeeData || !Array.isArray(employeeData) || employeeData.length === 0)) {
+      console.log('⚠️ 종사자 데이터가 로드되었지만 비어있음, 재로딩 시도...');
+      loadLazyData('employee');
+    }
+  }, [isLoaded?.employee, employeeData]);
 
   // API 호출 비활성화 - IndexedDB 데이터만 사용
   // useEffect(() => {
@@ -281,19 +310,123 @@ export default function ParticipantsPage() {
     }
   };
 
-  // 데이터 필터링 및 페이지네이션 - useMemo로 최적화
+  // 🎯 소속회원 기준 정확한 통계 계산 ('정상' 상태만)
+  const participantStats = useMemo(() => {
+    if (!participantData || participantData.length === 0) {
+      return { 
+        allParticipants: [], 
+        activeParticipants: [], 
+        totalCount: 0, 
+        activeCount: 0,
+        stats: { total: 0, complete: 0, partial: 0, inProgress: 0, none: 0 }
+      };
+    }
+    
+    console.log('\n🎯 소속회원 기준 통계 계산 시작');
+    console.log('- participantData:', participantData?.length || 0);
+    console.log('- basicEducationData:', basicEducationData?.length || 0);
+    console.log('- advancedEducationData:', advancedEducationData?.length || 0);
+    
+    const result = createParticipantBasedStats(
+      participantData,
+      basicEducationData || [],
+      advancedEducationData || [],
+      '2025-08-04' // 스냅샷 날짜 기준
+    );
+    
+    // 교육 통계 계산
+    const stats = {
+      total: result.activeCount,
+      complete: 0,
+      partial: 0,
+      inProgress: 0,
+      none: 0
+    };
+    
+    result.activeParticipants.forEach(participant => {
+      const basicCompleted = participant.basicEducationStatus === '수료' || 
+                            participant.basicEducationStatus === '완료' ||
+                            participant.basicTraining === '수료' ||
+                            participant.basicTraining === '완료';
+      const advancedCompleted = participant.advancedEducationStatus === '수료' || 
+                               participant.advancedEducationStatus === '완료' ||
+                               participant.advancedEducation === '수료' ||
+                               participant.advancedEducation === '완료';
+      
+      if (basicCompleted && advancedCompleted) {
+        stats.complete++;
+      } else if (basicCompleted || advancedCompleted) {
+        stats.partial++;
+      } else if (participant.basicEducationStatus || participant.advancedEducationStatus ||
+                 participant.basicTraining || participant.advancedEducation) {
+        stats.inProgress++;
+      } else {
+        stats.none++;
+      }
+    });
+    
+    console.log('📈 소속회원 기준 최종 통계:', stats);
+    
+    return { ...result, stats };
+  }, [participantData, basicEducationData, advancedEducationData]);
+
+  // 기존 로직도 유지 (비교용)
   const allParticipantStatusList = useMemo(() => getAllParticipantEducationStatus(), [participantData, getAllParticipantEducationStatus]);
   const summaryStats = useMemo(() => getEducationSummaryStats(), [participantData, getEducationSummaryStats]);
-  const dataInconsistencies = useMemo(() => getDataInconsistencies(), [participantData, getDataInconsistencies]);
+  // 🔍 데이터 불일치 분석 (백그라운드에서 항상 계산, 표시는 탭 클릭 시)
+  const dataInconsistencies = useMemo(() => {
+    if (employeeData && Array.isArray(employeeData) && employeeData.length > 0) {
+      console.log('🔍 데이터 불일치 분석 실행:', employeeData.length, '명 종사자 데이터 사용');
+      return getDataInconsistencies(employeeData);
+    }
+    console.log('⚠️ 데이터 불일치 분석 대기 중:', {
+      hasEmployeeData: !!(employeeData && Array.isArray(employeeData) && employeeData.length > 0),
+      employeeDataLength: employeeData?.length || 0,
+      isEmployeeLoaded: isLoaded?.employee
+    });
+    return [];
+  }, [participantData, employeeData, getDataInconsistencies]);
   
   const filteredData = useMemo(() => {
+    // 김미경 디버깅: 검색 시 김미경 데이터 확인
+    if (debouncedSearchTerm?.toLowerCase().includes('김미경') || debouncedSearchTerm?.toLowerCase().includes('ativan')) {
+      console.log('🔍 김미경 검색 디버깅:');
+      console.log('- 전체 참가자 데이터:', allParticipantStatusList?.length);
+      const kimMiKyung = allParticipantStatusList?.find(p => 
+        p.participant.name?.includes('김미경')
+      );
+      if (kimMiKyung) {
+        console.log('✅ 김미경 데이터 발견:', kimMiKyung.participant);
+      } else {
+        console.log('❌ 김미경 데이터 없음');
+        // 우리들노인통합지원센터 소속 확인
+        const uridulCenter = allParticipantStatusList?.filter(p => 
+          p.participant.institution?.includes('우리들') || 
+          p.participant.institution?.includes('노인통합지원센터') ||
+          p.participant.institutionCode === 'A48270003'
+        );
+        console.log('🏢 우리들노인통합지원센터 소속:', uridulCenter?.length, '명');
+        console.log('🏢 상위 5명 샘플:', uridulCenter?.slice(0, 5).map(p => ({
+          name: p.participant.name,
+          institution: p.participant.institution,
+          institutionCode: p.participant.institutionCode,
+          learningId: p.participant.learningId
+        })));
+      }
+    }
+    
     return allParticipantStatusList?.filter(participantStatus => {
       const participant = participantStatus.participant;
       const matchesSearch = !debouncedSearchTerm || 
         participant.name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
         participant.id?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
         participant.institution?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.jobType?.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
+        participant.jobType?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        participant.learningId?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        participant.residentId?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        participant.institutionCode?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        participant.district?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+        participant.birthDate?.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
       
       const matchesStatusFilter = statusFilter === 'all' || participantStatus.overallStatus === statusFilter;
       
@@ -382,9 +515,31 @@ export default function ParticipantsPage() {
             <List className="h-4 w-4 mr-2" />
             소속 회원 목록 ({participantData?.length || 0})
           </TabsTrigger>
-          <TabsTrigger value="inconsistencies">
+          <TabsTrigger value="inconsistencies" className="relative">
             <AlertTriangle className="h-4 w-4 mr-2" />
-            데이터 불일치 분석 ({dataInconsistencies?.reduce((sum, inst) => sum + inst.inconsistencies.length, 0) || 0})
+            <span>데이터 불일치 분석</span>
+            {/* 불일치 개수 표시 */}
+            {isLoaded?.employee && employeeData?.length > 0 && (
+              <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
+                dataInconsistencies.length > 0 
+                  ? 'bg-red-100 text-red-700' 
+                  : 'bg-green-100 text-green-700'
+              }`}>
+                {dataInconsistencies?.reduce((sum, inst) => sum + inst.inconsistencies.length, 0) || 0}건
+              </span>
+            )}
+            {/* 로딩 중 표시 */}
+            {!isLoaded?.employee && (
+              <span className="ml-2 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                로딩중...
+              </span>
+            )}
+            {/* 분석 안내 */}
+            {isLoaded?.employee && (!employeeData || employeeData.length === 0) && (
+              <span className="ml-2 px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-700">
+                클릭필요
+              </span>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -460,38 +615,39 @@ export default function ParticipantsPage() {
                 </div>
               ) : (
                 <>
-                  {/* 통계 요약 */}
+                  {/* 통계 요약 - 소속회원 기준 정확한 통계 ('정상' 상태만) */}
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                    <Card className="p-4 text-center border-l-4 border-l-gray-400">
-                      <div className="text-2xl font-bold text-gray-600">{summaryStats.total}</div>
-                      <div className="text-xs text-muted-foreground">총 인원</div>
+                    <Card className="p-4 text-center border-l-4 border-l-blue-400">
+                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.total}</div>
+                      <div className="text-xs text-muted-foreground">재직자 ('정상' 상태)</div>
+                      <div className="text-xs text-gray-500">전체: {participantStats.totalCount}명</div>
                     </Card>
                     <Card className="p-4 text-center border-l-4 border-l-green-500">
-                      <div className="text-2xl font-bold text-green-600">{summaryStats.complete}</div>
+                      <div className="text-2xl font-bold text-green-600">{participantStats.stats.complete}</div>
                       <div className="text-xs text-muted-foreground">🟢 완전수료</div>
                       <div className="text-xs text-green-600 font-medium">
-                        {summaryStats.total > 0 ? Math.round((summaryStats.complete / summaryStats.total) * 100) : 0}%
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.complete / participantStats.stats.total) * 100) : 0}%
                       </div>
                     </Card>
                     <Card className="p-4 text-center border-l-4 border-l-yellow-500">
-                      <div className="text-2xl font-bold text-yellow-600">{summaryStats.partial}</div>
+                      <div className="text-2xl font-bold text-yellow-600">{participantStats.stats.partial}</div>
                       <div className="text-xs text-muted-foreground">🟡 부분수료</div>
                       <div className="text-xs text-yellow-600 font-medium">
-                        {summaryStats.total > 0 ? Math.round((summaryStats.partial / summaryStats.total) * 100) : 0}%
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.partial / participantStats.stats.total) * 100) : 0}%
                       </div>
                     </Card>
                     <Card className="p-4 text-center border-l-4 border-l-blue-500">
-                      <div className="text-2xl font-bold text-blue-600">{summaryStats.inProgress}</div>
+                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.inProgress}</div>
                       <div className="text-xs text-muted-foreground">⚪ 진행중</div>
                       <div className="text-xs text-blue-600 font-medium">
-                        {summaryStats.total > 0 ? Math.round((summaryStats.inProgress / summaryStats.total) * 100) : 0}%
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.inProgress / participantStats.stats.total) * 100) : 0}%
                       </div>
                     </Card>
                     <Card className="p-4 text-center border-l-4 border-l-red-500">
-                      <div className="text-2xl font-bold text-red-600">{summaryStats.none}</div>
+                      <div className="text-2xl font-bold text-red-600">{participantStats.stats.none}</div>
                       <div className="text-xs text-muted-foreground">🔴 미수료</div>
                       <div className="text-xs text-red-600 font-medium">
-                        {summaryStats.total > 0 ? Math.round((summaryStats.none / summaryStats.total) * 100) : 0}%
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.none / participantStats.stats.total) * 100) : 0}%
                       </div>
                     </Card>
                   </div>
@@ -503,7 +659,7 @@ export default function ParticipantsPage() {
                         <div className="p-3 bg-muted rounded-md">
                           <div className="text-lg font-semibold">{filteredData.length}명</div>
                           <div className="text-xs text-muted-foreground">
-                            {searchTerm || statusFilter !== 'all' || jobTypeFilter !== 'all' || activeStatusFilter !== 'all' ? `필터된 결과 (재직자 기준 통계 ${summaryStats.total}명)` : '전체 회원'}
+                            {searchTerm || statusFilter !== 'all' || jobTypeFilter !== 'all' || activeStatusFilter !== 'all' ? `필터된 결과 (정상상태 ${participantStats.stats.total}명 중)` : '전체 정상상태 회원'}
                           </div>
                         </div>
                       </div>
@@ -712,20 +868,67 @@ export default function ParticipantsPage() {
               <CardTitle className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-orange-600" />
                 데이터 불일치 분석
+                {/* 디버그 정보 */}
+                {activeTab === 'inconsistencies' && (
+                  <Badge variant="outline" className="ml-2">
+                    종사자: {employeeData?.length || 0}명 | 로드상태: {isLoaded?.employee ? '✅' : '❌'}
+                  </Badge>
+                )}
               </CardTitle>
               <CardDescription>
-                <div className="space-y-2">
-                  <div>종사자 관리(모인우리) 데이터와 소속 회원(배움터) 데이터 간의 상태 불일치를 분석합니다.</div>
-                  <div><strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.</div>
+                <div className="space-y-3">
+                  <div className="text-gray-700">종사자 관리(모인우리) 데이터와 소속 회원(배움터) 데이터 간의 상태 불일치를 분석합니다.</div>
                   
-                  <div className="bg-blue-50 p-3 rounded-md mt-3">
+                  {/* 🎯 분석 상태 안내 */}
+                  <div className={`p-3 rounded-lg border-l-4 ${
+                    !isLoaded?.employee 
+                      ? 'bg-blue-50 border-l-blue-400'
+                      : employeeData?.length > 0 
+                        ? dataInconsistencies.length > 0
+                          ? 'bg-red-50 border-l-red-400'
+                          : 'bg-green-50 border-l-green-400'
+                        : 'bg-orange-50 border-l-orange-400'
+                  }`}>
+                    {!isLoaded?.employee ? (
+                      <div className="text-blue-800">
+                        <strong>📊 데이터 로딩 중...</strong> 
+                        <span className="text-blue-600 ml-2">종사자 데이터를 백그라운드에서 불러오고 있습니다.</span>
+                      </div>
+                    ) : employeeData?.length > 0 ? (
+                      dataInconsistencies.length > 0 ? (
+                        <div className="text-red-800">
+                          <strong>⚠️ 불일치 발견!</strong> 
+                          <span className="text-red-600 ml-2">
+                            {dataInconsistencies.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건의 
+                            데이터 불일치가 발견되었습니다.
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-green-800">
+                          <strong>✅ 분석 완료!</strong> 
+                          <span className="text-green-600 ml-2">모든 데이터가 일치합니다.</span>
+                        </div>
+                      )
+                    ) : (
+                      <div className="text-orange-800">
+                        <strong>🔄 분석 준비 중...</strong> 
+                        <span className="text-orange-600 ml-2">종사자 데이터를 로딩하고 있습니다.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-sm text-gray-600">
+                    <strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.
+                  </div>
+                  
+                  <div className="bg-blue-50 p-3 rounded-md">
                     <h4 className="font-semibold text-blue-800 mb-2">📋 상태 일치 기준</h4>
                     <ul className="text-sm text-blue-700 space-y-1">
-                      <li><strong>재직 상태 일치:</strong> 배움터 "정상" ↔ 모인우리 "재직"</li>
-                      <li><strong>퇴직 상태 일치:</strong> 배움터 "휴면대상", "중지", "탈퇴" ↔ 모인우리 "퇴직"</li>
-                      <li><strong>퇴사일 일치:</strong> 양쪽 모두 동일한 날짜 또는 10일 이내 차이</li>
-                      <li><strong>퇴사일 불일치:</strong> 한쪽만 퇴사일 있음, 또는 10일 이상 차이</li>
-                      <li><strong>불일치 예시:</strong> 배움터 "정상" ↔ 모인우리 "퇴직"</li>
+                      <li><strong className="text-blue-800">재직 상태 일치:</strong> 배움터 "정상" ↔ 모인우리 "재직"</li>
+                      <li><strong className="text-blue-800">퇴직 상태 일치:</strong> 배움터 "휴면대상", "중지", "탈퇴" ↔ 모인우리 "퇴직"</li>
+                      <li><strong className="text-blue-800">퇴사일 일치:</strong> 양쪽 모두 동일한 날짜 또는 10일 이내 차이</li>
+                      <li><strong className="text-blue-800">퇴사일 불일치:</strong> 한쪽만 퇴사일 있음, 또는 10일 이상 차이</li>
+                      <li><strong className="text-blue-800">불일치 예시:</strong> 배움터 "정상" ↔ 모인우리 "퇴직"</li>
                     </ul>
                   </div>
                 </div>
@@ -734,10 +937,65 @@ export default function ParticipantsPage() {
             <CardContent>
               {dataInconsistencies.length === 0 ? (
                 <div className="text-center py-8">
-                  <div className="text-orange-600 mb-2">⚠️ 종사자 데이터 필요</div>
-                  <div className="text-muted-foreground mb-4">
-                    종사자 관리(모인우리) 데이터가 업로드되지 않아 불일치 분석을 할 수 없습니다.
-                  </div>
+                  {!isLoaded?.employee ? (
+                    <div>
+                      <div className="text-blue-600 mb-2">📊 데이터 분석 준비 중...</div>
+                      <div className="text-blue-500 mb-4">
+                        백그라운드에서 종사자 데이터를 로딩하고 있습니다.
+                      </div>
+                      <div className="flex items-center justify-center gap-2 text-blue-400">
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                        잠시만 기다려주세요...
+                      </div>
+                    </div>
+                  ) : employeeData?.length > 0 ? (
+                    <div>
+                      <div className="text-green-600 mb-2">✅ 데이터 일치 확인</div>
+                      <div className="text-green-500 mb-4">
+                        모든 종사자 데이터와 소속 회원 데이터가 일치합니다.
+                      </div>
+                      <div className="text-sm text-gray-600">
+                        총 {employeeData?.length || 0}명의 데이터를 분석한 결과입니다.
+                      </div>
+                      {/* 소속회원 기준 디버그 정보 */}
+                      <div className="text-xs text-gray-500 mt-2 p-2 bg-blue-50 rounded">
+                        <div>🔍 소속회원 기준 통계:</div>
+                        <div>- 전체 소속회원: {participantStats.totalCount}명</div>
+                        <div>- 정상상태만: {participantStats.stats.total}명</div>
+                        <div>- 교육 데이터: 기초 {basicEducationData?.length || 0}건, 심화 {advancedEducationData?.length || 0}건</div>
+                        <div className="text-green-600 font-medium">✅ 논리적으로 일관된 통계</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="text-orange-600 mb-2">⚠️ 종사자 데이터 필요</div>
+                      <div className="text-orange-500 mb-4">
+                        종사자 관리(모인우리) 데이터가 업로드되지 않아 불일치 분석을 할 수 없습니다.
+                      </div>
+                      
+                      {/* 디버그 정보 및 수동 로드 버튼 */}
+                      <div className="bg-orange-50 p-4 rounded-md mb-4">
+                        <h4 className="font-semibold text-orange-800 mb-2">🔧 디버그 정보</h4>
+                        <div className="text-sm text-orange-600 space-y-1">
+                          <div>종사자 데이터 배열: {employeeData ? `${employeeData.length}명` : '없음'}</div>
+                          <div>로드 상태: {isLoaded?.employee ? '로드 완료' : '미로드'}</div>
+                          <div>데이터 타입: {Array.isArray(employeeData) ? '배열' : typeof employeeData}</div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-3 border-orange-300 text-orange-700 hover:bg-orange-100"
+                          onClick={() => {
+                            console.log('🔄 수동 종사자 데이터 로드 시작...');
+                            loadLazyData('employee');
+                          }}
+                        >
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          종사자 데이터 수동 로드
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="bg-orange-50 p-4 rounded-md">
                     <h4 className="font-semibold text-orange-800 mb-2">📝 다음 단계</h4>
                     <ol className="text-sm text-orange-700 list-decimal list-inside space-y-1">
