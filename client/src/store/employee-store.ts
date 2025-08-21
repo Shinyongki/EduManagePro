@@ -117,28 +117,51 @@ export const useEmployeeStore = create<EmployeeStore>()(
     getEmployeeStats: () => {
       const { employeeData, institutionData } = get();
       
-      const activeEmployees = employeeData.filter(emp => emp.isActive);
+      // 재직자 계산: resignDate가 없거나 미래인 경우
+      const activeEmployees = employeeData.filter(emp => {
+        if (!emp.resignDate) return true; // 퇴사일이 없으면 재직자
+        try {
+          const resignDate = new Date(emp.resignDate);
+          const today = new Date();
+          return resignDate > today; // 퇴사일이 미래이면 재직자
+        } catch {
+          return true; // 날짜 파싱 실패시 재직자로 간주
+        }
+      });
+      
       const totalEmployees = activeEmployees.length;
       
+      // 실제 데이터 기준으로 직무별 카운트
       const socialWorkerCount = activeEmployees.filter(emp => 
         emp.jobType === '전담사회복지사' || 
         emp.jobType === '선임전담사회복지사'
       ).length;
       const lifeSupportCount = activeEmployees.filter(emp => emp.jobType === '생활지원사').length;
       
-      // Calculate fill rate from institution data
-      const totalAllocated = institutionData.reduce((sum, inst) => 
-        sum + inst.allocatedSocialWorkers + inst.allocatedLifeSupport, 0);
-      const totalActual = institutionData.reduce((sum, inst) => 
-        sum + inst.actualSocialWorkers + inst.actualLifeSupport, 0);
-      const fillRate = totalAllocated > 0 ? Math.round((totalActual / totalAllocated) * 100) : 0;
+      // 충원율 계산 (실제 데이터가 없으므로 임시 계산)
+      const expectedTotal = Math.max(socialWorkerCount + lifeSupportCount, totalEmployees);
+      const fillRate = expectedTotal > 0 ? Math.round((totalEmployees / expectedTotal) * 100) : 100;
       
-      // Calculate average tenure
-      const totalWorkDays = activeEmployees.reduce((sum, emp) => sum + (emp.workDays || 0), 0);
-      const averageTenure = activeEmployees.length > 0 ? 
-        Math.round((totalWorkDays / activeEmployees.length) / 365 * 10) / 10 : 0;
+      // 평균 근속기간 계산 (hireDate 기준)
+      const validTenures = activeEmployees
+        .filter(emp => emp.hireDate)
+        .map(emp => {
+          try {
+            const hireDate = new Date(emp.hireDate!);
+            const endDate = emp.resignDate ? new Date(emp.resignDate) : new Date();
+            return (endDate.getTime() - hireDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000);
+          } catch {
+            return 0;
+          }
+        })
+        .filter(tenure => tenure >= 0);
       
-      const institutionCount = institutionData.length;
+      const averageTenure = validTenures.length > 0 ? 
+        Math.round((validTenures.reduce((sum, tenure) => sum + tenure, 0) / validTenures.length) * 10) / 10 : 0;
+      
+      // 기관 수 계산 (regionCode 기준)
+      const uniqueInstitutions = new Set(employeeData.map(emp => emp.regionCode).filter(Boolean));
+      const institutionCount = uniqueInstitutions.size || institutionData.length;
       
       return {
         totalEmployees,

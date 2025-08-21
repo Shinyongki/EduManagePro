@@ -401,6 +401,65 @@ export default function Dashboard() {
 
   // 지도 데이터 생성 함수
   const getMapData = () => {
+    console.log('🗺️ 지도 데이터 생성 시작:', { 
+      selectedMapData, 
+      analysisDataLength: analysisData.length,
+      employeeDataLength: employeeData?.length || 0 
+    });
+    
+    // analysisData가 비어있으면 employeeData에서 직접 지역 정보 추출 시도
+    if (analysisData.length === 0 && employeeData && employeeData.length > 0) {
+      console.log('📊 분석 데이터가 없으므로 종사자 데이터에서 지역 정보 추출');
+      
+      if (selectedMapData === 'institutions') {
+        // 종사자 데이터에서 기관별 집계
+        const regionCounts = employeeData.reduce((acc, emp) => {
+          const district = emp.district || emp.regionName || '기타';
+          acc[district] = (acc[district] || 0) + 0.1; // 기관 수 추정
+          return acc;
+        }, {} as Record<string, number>);
+
+        const mapData = Object.entries(regionCounts).map(([district, count]) => ({
+          district,
+          value: Math.ceil(count) * 20, // 시각화를 위해 스케일 조정
+          label: `${Math.ceil(count)}개 기관 (추정)`,
+          description: `약 ${Math.ceil(count)}개의 사회복지기관이 운영 중입니다.`
+        }));
+        console.log('🏢 기관 지도 데이터 생성:', mapData.length, '개 지역');
+        return mapData;
+        
+      } else if (selectedMapData === 'employees') {
+        // 종사자 수 데이터 (지역별 합계)
+        const regionEmployees = employeeData.reduce((acc, emp) => {
+          const district = emp.district || emp.regionName || '기타';
+          acc[district] = (acc[district] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+
+        const mapData = Object.entries(regionEmployees).map(([district, count]) => ({
+          district,
+          value: Math.min(count / 10, 100), // 시각화를 위해 스케일 조정
+          label: `${count}명`,
+          description: `총 ${count}명의 종사자가 근무 중입니다.`
+        }));
+        console.log('👥 종사자 지도 데이터 생성:', mapData.length, '개 지역');
+        return mapData;
+        
+      } else if (selectedMapData === 'education') {
+        // 교육 데이터가 없으므로 기본값 반환
+        const uniqueDistricts = [...new Set(employeeData.map(emp => emp.district || emp.regionName).filter(Boolean))];
+        const mapData = uniqueDistricts.map(district => ({
+          district,
+          value: 50, // 기본 값
+          label: `데이터 없음`,
+          description: `교육 데이터가 연동되지 않았습니다.`
+        }));
+        console.log('🎓 교육 지도 데이터 생성 (기본값):', mapData.length, '개 지역');
+        return mapData;
+      }
+    }
+    
+    // 기존 analysisData 기반 처리
     if (selectedMapData === 'institutions') {
       // 기관 수 데이터 (지역별 집계)
       const regionCounts = analysisData.reduce((acc, item) => {
@@ -409,12 +468,15 @@ export default function Dashboard() {
         return acc;
       }, {} as Record<string, number>);
 
-      return Object.entries(regionCounts).map(([district, count]) => ({
+      const mapData = Object.entries(regionCounts).map(([district, count]) => ({
         district,
         value: count * 20, // 시각화를 위해 스케일 조정
         label: `${count}개 기관`,
         description: `총 ${count}개의 사회복지기관이 운영 중입니다.`
       }));
+      console.log('🏢 분석 기반 기관 지도 데이터:', mapData.length, '개 지역');
+      return mapData;
+      
     } else if (selectedMapData === 'education') {
       // 교육 이수율 데이터 (지역별 평균)
       const regionEducation = analysisData.reduce((acc, item) => {
@@ -427,7 +489,7 @@ export default function Dashboard() {
         return acc;
       }, {} as Record<string, { total: number; count: number }>);
 
-      return Object.entries(regionEducation).map(([district, data]) => {
+      const mapData = Object.entries(regionEducation).map(([district, data]) => {
         const avgRate = data.total / data.count;
         return {
           district,
@@ -436,6 +498,9 @@ export default function Dashboard() {
           description: `교육 이수율 평균: ${avgRate?.toFixed(1) || '0.0'}%`
         };
       });
+      console.log('🎓 분석 기반 교육 지도 데이터:', mapData.length, '개 지역');
+      return mapData;
+      
     } else if (selectedMapData === 'employees') {
       // 종사자 수 데이터 (지역별 합계)
       const regionEmployees = analysisData.reduce((acc, item) => {
@@ -444,14 +509,17 @@ export default function Dashboard() {
         return acc;
       }, {} as Record<string, number>);
 
-      return Object.entries(regionEmployees).map(([district, count]) => ({
+      const mapData = Object.entries(regionEmployees).map(([district, count]) => ({
         district,
         value: Math.min(count * 2, 100), // 시각화를 위해 스케일 조정
         label: `${count}명`,
         description: `총 ${count}명의 종사자가 근무 중입니다.`
       }));
+      console.log('👥 분석 기반 종사자 지도 데이터:', mapData.length, '개 지역');
+      return mapData;
     }
     
+    console.log('⚠️ 지도 데이터 생성 실패: 빈 배열 반환');
     return [];
   };
 
@@ -655,58 +723,6 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* 경상남도 지도 섹션 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Map className="h-5 w-5 text-purple-600" />
-            경상남도 시군구별 현황
-          </CardTitle>
-          <CardDescription>
-            경상남도 18개 시군의 행정 경계와 데이터 시각화
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {/* 데이터 선택 버튼 */}
-            <div className="flex gap-2 flex-wrap">
-              <Button
-                variant={selectedMapData === 'institutions' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSelectedMapData('institutions')}
-              >
-                <Building className="h-4 w-4 mr-1" />
-                기관 현황
-              </Button>
-              <Button
-                variant={selectedMapData === 'education' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSelectedMapData('education')}
-              >
-                <GraduationCap className="h-4 w-4 mr-1" />
-                교육 이수율
-              </Button>
-              <Button
-                variant={selectedMapData === 'employees' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setSelectedMapData('employees')}
-              >
-                <Users className="h-4 w-4 mr-1" />
-                종사자 분포
-              </Button>
-            </div>
-            
-            {/* 지도 컴포넌트 */}
-            <GyeongsangnamMap
-              data={getMapData()}
-              showLabels={true}
-              colorScheme={getMapColorScheme()}
-              title={getMapTitle()}
-              height="500px"
-            />
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Main Analysis Section */}
       <Tabs defaultValue="table" className="w-full">
@@ -994,6 +1010,86 @@ export default function Dashboard() {
         </TabsContent>
         
       </Tabs>
+
+      {/* 경상남도 지도 섹션 - 하단으로 이동, 2배 확대 */}
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Map className="h-6 w-6 text-purple-600" />
+            경상남도 시군구별 현황 지도
+          </CardTitle>
+          <CardDescription>
+            경상남도 18개 시군의 행정 경계와 상세 데이터 시각화 - 각 지역별 종사자, 교육, 기관 현황을 한눈에 확인
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-6">
+            {/* 데이터 선택 버튼 - 더 크게 */}
+            <div className="flex gap-3 flex-wrap justify-center">
+              <Button
+                variant={selectedMapData === 'institutions' ? 'default' : 'outline'}
+                size="default"
+                onClick={() => setSelectedMapData('institutions')}
+                className="px-6 py-3"
+              >
+                <Building className="h-5 w-5 mr-2" />
+                기관 현황
+              </Button>
+              <Button
+                variant={selectedMapData === 'education' ? 'default' : 'outline'}
+                size="default"
+                onClick={() => setSelectedMapData('education')}
+                className="px-6 py-3"
+              >
+                <GraduationCap className="h-5 w-5 mr-2" />
+                교육 이수율
+              </Button>
+              <Button
+                variant={selectedMapData === 'employees' ? 'default' : 'outline'}
+                size="default"
+                onClick={() => setSelectedMapData('employees')}
+                className="px-6 py-3"
+              >
+                <Users className="h-5 w-5 mr-2" />
+                종사자 분포
+              </Button>
+            </div>
+            
+            {/* 지도 컴포넌트 - 2배 크기로 확대 */}
+            <div className="w-full bg-slate-50 p-6 rounded-lg border">
+              <GyeongsangnamMap
+                data={getMapData()}
+                showLabels={true}
+                colorScheme={getMapColorScheme()}
+                title={getMapTitle()}
+                height="1000px"
+              />
+            </div>
+            
+            {/* 지도 범례 및 설명 추가 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+              <Card className="bg-blue-50">
+                <CardContent className="p-4">
+                  <h4 className="font-semibold text-blue-800 mb-2">기관 현황 모드</h4>
+                  <p className="text-sm text-blue-600">각 시군구별 복지기관 분포와 운영 현황을 표시합니다.</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-green-50">
+                <CardContent className="p-4">
+                  <h4 className="font-semibold text-green-800 mb-2">교육 이수율 모드</h4>
+                  <p className="text-sm text-green-600">지역별 종사자 교육 완료율과 진행 상황을 시각화합니다.</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-purple-50">
+                <CardContent className="p-4">
+                  <h4 className="font-semibold text-purple-800 mb-2">종사자 분포 모드</h4>
+                  <p className="text-sm text-purple-600">전담사회복지사, 생활지원사 등 직종별 인력 분포를 표시합니다.</p>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

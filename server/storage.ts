@@ -352,20 +352,14 @@ export class MemStorage implements IStorage {
   }
 }
 
+// Import file storage for persistent data
+import { FileStorage } from './file-storage';
+
 // Auto-select storage based on environment
 let storageInstance: IStorage;
 
-// Check if running in Electron
-const isElectron = typeof process !== 'undefined' && process.versions && process.versions.electron;
+// Always use file storage for persistent data in all environments
+// This ensures data persistence across server restarts
+storageInstance = new FileStorage();
 
-if (isElectron) {
-  // In Electron, use file storage
-  import('./file-storage').then(({ FileStorage }) => {
-    storageInstance = new FileStorage();
-  });
-} else {
-  // In web/development, use memory storage
-  storageInstance = new MemStorage();
-}
-
-export const storage = storageInstance || new MemStorage();
+export const storage = storageInstance;

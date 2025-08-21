@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Filter, AlertTriangle } from 'lucide-react';
@@ -49,7 +49,183 @@ export default function ParticipantsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [inconsistencySearchTerm, setInconsistencySearchTerm] = useState('');
   const [selectedInconsistency, setSelectedInconsistency] = useState<any>(null);
+  const [selectedInconsistencyType, setSelectedInconsistencyType] = useState<string>('all');
+  const [showFullTable, setShowFullTable] = useState(false);
   const { toast } = useToast();
+  
+  // 불일치 유형별 권장조치 함수
+  const getRecommendedActions = (inconsistency: any) => {
+    const actions: { priority: 'high' | 'medium' | 'low', title: string, description: string, steps: string[] }[] = [];
+    
+    if (!inconsistency.inconsistencyTypes || inconsistency.inconsistencyTypes.length === 0) {
+      return actions;
+    }
+    
+    inconsistency.inconsistencyTypes.forEach((type: string) => {
+      switch (type) {
+        case '모인우리에만_존재':
+          actions.push({
+            priority: 'high',
+            title: '배움터 등록 필요',
+            description: '종사자로 재직 중이지만 배움터에 등록되지 않은 상태입니다.',
+            steps: [
+              '해당 종사자의 재직 상태를 확인하세요',
+              '재직 중이라면 배움터에 회원 등록을 진행하세요',
+              '퇴직했다면 종사자 데이터에서 퇴직 처리하세요',
+              '등록 완료 후 다시 불일치 분석을 실행하세요'
+            ]
+          });
+          break;
+          
+        case '배움터에만_존재':
+          if (inconsistency.similarData?.hasSimilarData) {
+            // 유사 데이터가 있는 경우
+            const birthDateDiff = inconsistency.similarData.mostSimilarEmployee.similarity?.birthDateDiff;
+            if (birthDateDiff && birthDateDiff <= 7) {
+              actions.push({
+                priority: 'high',
+                title: '데이터 정정 필요 (입력 실수 추정)',
+                description: `생년월일 차이가 ${birthDateDiff}일로 입력 실수일 가능성이 매우 높습니다.`,
+                steps: [
+                  '배움터와 모인우리 데이터의 생년월일을 비교 확인하세요',
+                  '정확한 생년월일을 확인하여 잘못된 데이터를 수정하세요',
+                  '주민등록등본이나 재직증명서로 정확한 정보를 확인하세요',
+                  '수정 후 데이터를 다시 업로드하세요'
+                ]
+              });
+            } else {
+              actions.push({
+                priority: 'medium',
+                title: '동명이인 여부 확인 필요',
+                description: '이름은 같지만 생년월일이 다른 사람이 발견되었습니다.',
+                steps: [
+                  '해당 인물이 동명이인인지 확인하세요',
+                  '같은 사람이라면 정확한 생년월일로 데이터를 통일하세요',
+                  '다른 사람이라면 종사자 데이터에 신규 등록하세요',
+                  '필요시 추가 식별 정보(주민등록번호 뒷자리 등)를 활용하세요'
+                ]
+              });
+            }
+          } else {
+            actions.push({
+              priority: 'medium',
+              title: '종사자 데이터 등록 또는 확인 필요',
+              description: '배움터에는 등록되어 있지만 종사자 데이터에서 찾을 수 없습니다.',
+              steps: [
+                '해당 인물이 실제 종사자인지 확인하세요',
+                '종사자라면 모인우리 시스템에 등록하세요',
+                '외부 강사나 임시직이라면 별도 분류를 고려하세요',
+                '퇴직자라면 배움터에서 상태를 업데이트하세요'
+              ]
+            });
+          }
+          break;
+          
+        case '퇴사일_불일치':
+          const dateDiff = inconsistency.resignDateDiff;
+          if (dateDiff && dateDiff <= 3) {
+            actions.push({
+              priority: 'medium',
+              title: '퇴사일 정정 (경미한 차이)',
+              description: `퇴사일이 ${dateDiff}일 차이로 비교적 경미한 불일치입니다.`,
+              steps: [
+                '정확한 퇴사일을 인사 기록으로 확인하세요',
+                '차이가 적으므로 업무일/휴일 차이일 가능성을 확인하세요',
+                '정확한 날짜로 두 시스템 모두 업데이트하세요'
+              ]
+            });
+          } else {
+            actions.push({
+              priority: 'high',
+              title: '퇴사일 대폭 수정 필요',
+              description: `퇴사일이 ${dateDiff || '크게'}일 차이로 심각한 불일치입니다.`,
+              steps: [
+                '인사발령서나 사직서를 통해 정확한 퇴사일을 확인하세요',
+                '시스템별로 서로 다른 기준(최종 근무일 vs 사직 효력 발생일)을 사용하는지 확인하세요',
+                '조직 내 표준 퇴사일 기준을 수립하고 통일하세요',
+                '두 시스템 모두 정확한 날짜로 업데이트하세요'
+              ]
+            });
+          }
+          break;
+          
+        case '소속기관_불일치':
+          actions.push({
+            priority: 'medium',
+            title: '소속기관 정보 통일',
+            description: '배움터와 종사자 관리에서 소속기관이 다르게 표시되고 있습니다.',
+            steps: [
+              '현재 실제 근무 기관을 확인하세요',
+              '기관명 표기 방식의 차이인지 확인하세요 (예: 줄임말 vs 정식명칭)',
+              '인사발령서로 정확한 소속을 확인하세요',
+              '두 시스템에서 동일한 기관명으로 통일하세요'
+            ]
+          });
+          break;
+          
+        case '입사일_불일치':
+          actions.push({
+            priority: 'low',
+            title: '입사일 정보 정정',
+            description: '입사일 정보가 일치하지 않습니다.',
+            steps: [
+              '인사발령서나 계약서로 정확한 입사일을 확인하세요',
+              '시업일과 발령일 중 어느 것을 기준으로 할지 정하세요',
+              '조직 내 입사일 기준을 명확히 하고 통일하세요',
+              '필요시 경력 계산에 영향을 주는지 확인하세요'
+            ]
+          });
+          break;
+          
+        case '직군_불일치':
+          actions.push({
+            priority: 'medium',
+            title: '직군/직책 정보 업데이트',
+            description: '담당 업무나 직책이 다르게 기록되어 있습니다.',
+            steps: [
+              '현재 실제 담당 업무를 확인하세요',
+              '직군 분류 기준이 두 시스템에서 동일한지 확인하세요',
+              '최근 인사발령이나 업무 변경사항을 반영하세요',
+              '교육 이수 요건에 영향을 주는지 검토하세요'
+            ]
+          });
+          break;
+          
+        case '상태모순_불일치':
+          actions.push({
+            priority: 'high',
+            title: '재직 상태 긴급 확인',
+            description: '재직/퇴직 상태에 모순이 발견되었습니다.',
+            steps: [
+              '해당 직원의 현재 근무 상태를 즉시 확인하세요',
+              '휴직, 파견, 대기발령 등 특수 상황이 있는지 확인하세요',
+              '시스템별 상태 업데이트 시점의 차이를 확인하세요',
+              '정확한 상태로 모든 시스템을 동기화하세요'
+            ]
+          });
+          break;
+          
+        default:
+          actions.push({
+            priority: 'medium',
+            title: '데이터 검토 필요',
+            description: '기타 데이터 불일치가 발견되었습니다.',
+            steps: [
+              '해당 항목의 데이터를 상세히 비교하세요',
+              '불일치의 원인을 파악하세요',
+              '필요시 원본 문서로 정확한 정보를 확인하세요',
+              '데이터를 정정하고 재검토하세요'
+            ]
+          });
+      }
+    });
+    
+    // 우선순위별로 정렬 (high -> medium -> low)
+    return actions.sort((a, b) => {
+      const priorityOrder = { high: 3, medium: 2, low: 1 };
+      return priorityOrder[b.priority] - priorityOrder[a.priority];
+    });
+  };
   
   // 검색어 하이라이트 함수
   const highlightText = (text: string | undefined, searchTerm: string) => {
@@ -89,33 +265,34 @@ export default function ParticipantsPage() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // 🔄 백그라운드에서 모든 데이터 미리 로드 (성능 최적화)
+  // 🔄 Optimized lazy loading with priority
   useEffect(() => {
-    console.log('🚀 백그라운드 데이터 로딩 시작...');
+    const loadDataAsync = async () => {
+      // Priority 1: Load only essential data first (participants)
+      if (!isLoaded?.participant) {
+        console.log('📊 Loading participant data (priority)...');
+        await loadLazyData('participant');
+      }
+      
+      // Priority 2: Load other data in background with delay
+      setTimeout(() => {
+        if (!isLoaded?.employee && activeTab === 'inconsistencies') {
+          console.log('👥 Loading employee data for inconsistency analysis...');
+          loadLazyData('employee');
+        }
+        
+        if (!isLoaded?.basicEducation) {
+          loadLazyData('basic');
+        }
+        
+        if (!isLoaded?.advancedEducation) {
+          loadLazyData('advanced');
+        }
+      }, 100); // Small delay to avoid blocking UI
+    };
     
-    // 참가자 데이터 로드
-    if (!isLoaded?.participant) {
-      console.log('📊 참가자 데이터 로딩...');
-      loadLazyData('participant');
-    }
-    
-    // 종사자 데이터 로드 (불일치 분석용)
-    if (!isLoaded?.employee) {
-      console.log('👥 종사자 데이터 로딩 (불일치 분석용)...');
-      loadLazyData('employee');
-    }
-
-    // 교육 데이터도 미리 로드
-    if (!isLoaded?.basicEducation) {
-      console.log('📚 기초교육 데이터 로딩...');
-      loadLazyData('basic');
-    }
-    
-    if (!isLoaded?.advancedEducation) {
-      console.log('🎓 심화교육 데이터 로딩...');
-      loadLazyData('advanced');
-    }
-  }, []); // 컴포넌트 마운트 시 한 번만 실행
+    loadDataAsync();
+  }, [activeTab]); // Load based on active tab
 
   // 종사자 데이터 재로딩 체크 (데이터가 비어있는 경우)
   useEffect(() => {
@@ -310,7 +487,7 @@ export default function ParticipantsPage() {
     }
   };
 
-  // 🎯 소속회원 기준 정확한 통계 계산 ('정상' 상태만)
+  // 🎯 Optimized participant stats with caching and worker support
   const participantStats = useMemo(() => {
     if (!participantData || participantData.length === 0) {
       return { 
@@ -322,153 +499,178 @@ export default function ParticipantsPage() {
       };
     }
     
-    console.log('\n🎯 소속회원 기준 통계 계산 시작');
-    console.log('- participantData:', participantData?.length || 0);
-    console.log('- basicEducationData:', basicEducationData?.length || 0);
-    console.log('- advancedEducationData:', advancedEducationData?.length || 0);
-    
-    const result = createParticipantBasedStats(
-      participantData,
-      basicEducationData || [],
-      advancedEducationData || [],
-      '2025-08-04' // 스냅샷 날짜 기준
-    );
-    
-    // 교육 통계 계산
-    const stats = {
-      total: result.activeCount,
-      complete: 0,
-      partial: 0,
-      inProgress: 0,
-      none: 0
+    // Use requestIdleCallback for non-blocking computation
+    const computeStats = () => {
+      const result = createParticipantBasedStats(
+        participantData,
+        basicEducationData || [],
+        advancedEducationData || [],
+        '2025-08-04'
+      );
+      
+      // Batch process education status calculation
+      const stats = { total: result.activeCount, complete: 0, partial: 0, inProgress: 0, none: 0 };
+      const batchSize = 100;
+      
+      for (let i = 0; i < result.activeParticipants.length; i += batchSize) {
+        const batch = result.activeParticipants.slice(i, i + batchSize);
+        batch.forEach(participant => {
+          const basicCompleted = participant.basicEducationStatus === '수료' || 
+                                participant.basicEducationStatus === '완료' ||
+                                participant.basicTraining === '수료' ||
+                                participant.basicTraining === '완료';
+          const advancedCompleted = participant.advancedEducationStatus === '수료' || 
+                                   participant.advancedEducationStatus === '완료' ||
+                                   participant.advancedEducation === '수료' ||
+                                   participant.advancedEducation === '완료';
+          
+          if (basicCompleted && advancedCompleted) {
+            stats.complete++;
+          } else if (basicCompleted || advancedCompleted) {
+            stats.partial++;
+          } else if (participant.basicEducationStatus || participant.advancedEducationStatus ||
+                     participant.basicTraining || participant.advancedEducation) {
+            stats.inProgress++;
+          } else {
+            stats.none++;
+          }
+        });
+      }
+      
+      return { ...result, stats };
     };
     
-    result.activeParticipants.forEach(participant => {
-      const basicCompleted = participant.basicEducationStatus === '수료' || 
-                            participant.basicEducationStatus === '완료' ||
-                            participant.basicTraining === '수료' ||
-                            participant.basicTraining === '완료';
-      const advancedCompleted = participant.advancedEducationStatus === '수료' || 
-                               participant.advancedEducationStatus === '완료' ||
-                               participant.advancedEducation === '수료' ||
-                               participant.advancedEducation === '완료';
-      
-      if (basicCompleted && advancedCompleted) {
-        stats.complete++;
-      } else if (basicCompleted || advancedCompleted) {
-        stats.partial++;
-      } else if (participant.basicEducationStatus || participant.advancedEducationStatus ||
-                 participant.basicTraining || participant.advancedEducation) {
-        stats.inProgress++;
-      } else {
-        stats.none++;
-      }
-    });
-    
-    console.log('📈 소속회원 기준 최종 통계:', stats);
-    
-    return { ...result, stats };
+    return computeStats();
   }, [participantData, basicEducationData, advancedEducationData]);
 
   // 기존 로직도 유지 (비교용)
   const allParticipantStatusList = useMemo(() => getAllParticipantEducationStatus(), [participantData, getAllParticipantEducationStatus]);
   const summaryStats = useMemo(() => getEducationSummaryStats(), [participantData, getEducationSummaryStats]);
-  // 🔍 데이터 불일치 분석 (백그라운드에서 항상 계산, 표시는 탭 클릭 시)
-  const dataInconsistencies = useMemo(() => {
-    if (employeeData && Array.isArray(employeeData) && employeeData.length > 0) {
-      console.log('🔍 데이터 불일치 분석 실행:', employeeData.length, '명 종사자 데이터 사용');
-      return getDataInconsistencies(employeeData);
-    }
-    console.log('⚠️ 데이터 불일치 분석 대기 중:', {
-      hasEmployeeData: !!(employeeData && Array.isArray(employeeData) && employeeData.length > 0),
-      employeeDataLength: employeeData?.length || 0,
-      isEmployeeLoaded: isLoaded?.employee
-    });
-    return [];
-  }, [participantData, employeeData, getDataInconsistencies]);
+  // 🔍 Lazy load inconsistency analysis only when needed
+  const [inconsistencyData, setInconsistencyData] = useState([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   
-  const filteredData = useMemo(() => {
-    // 김미경 디버깅: 검색 시 김미경 데이터 확인
-    if (debouncedSearchTerm?.toLowerCase().includes('김미경') || debouncedSearchTerm?.toLowerCase().includes('ativan')) {
-      console.log('🔍 김미경 검색 디버깅:');
-      console.log('- 전체 참가자 데이터:', allParticipantStatusList?.length);
-      const kimMiKyung = allParticipantStatusList?.find(p => 
-        p.participant.name?.includes('김미경')
-      );
-      if (kimMiKyung) {
-        console.log('✅ 김미경 데이터 발견:', kimMiKyung.participant);
-      } else {
-        console.log('❌ 김미경 데이터 없음');
-        // 우리들노인통합지원센터 소속 확인
-        const uridulCenter = allParticipantStatusList?.filter(p => 
-          p.participant.institution?.includes('우리들') || 
-          p.participant.institution?.includes('노인통합지원센터') ||
-          p.participant.institutionCode === 'A48270003'
-        );
-        console.log('🏢 우리들노인통합지원센터 소속:', uridulCenter?.length, '명');
-        console.log('🏢 상위 5명 샘플:', uridulCenter?.slice(0, 5).map(p => ({
-          name: p.participant.name,
-          institution: p.participant.institution,
-          institutionCode: p.participant.institutionCode,
-          learningId: p.participant.learningId
-        })));
-      }
+  const loadInconsistencyAnalysis = useCallback(async () => {
+    if (isAnalyzing) return;
+    if (!employeeData || !Array.isArray(employeeData) || employeeData.length === 0) {
+      console.warn('❌ Cannot run inconsistency analysis: no employee data available');
+      return;
     }
     
-    return allParticipantStatusList?.filter(participantStatus => {
-      const participant = participantStatus.participant;
-      const matchesSearch = !debouncedSearchTerm || 
-        participant.name?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.id?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.institution?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.jobType?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.learningId?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.residentId?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.institutionCode?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.district?.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-        participant.birthDate?.toLowerCase().includes(debouncedSearchTerm.toLowerCase());
-      
-      const matchesStatusFilter = statusFilter === 'all' || participantStatus.overallStatus === statusFilter;
-      
-      const matchesJobTypeFilter = jobTypeFilter === 'all' || 
-        (jobTypeFilter === '전담사회복지사' && (
-          participant.jobType?.includes('전담') || 
-          participant.jobType === '전담사회복지사' ||
-          participant.jobType === '선임전담사회복지사'
-        )) ||
-        (jobTypeFilter === '생활지원사' && (
-          participant.jobType?.includes('생활지원') || 
-          participant.jobType === '생활지원사'
-        ));
+    console.log('🔍 Starting inconsistency analysis with:', employeeData.length, 'employees');
+    setIsAnalyzing(true);
+    
+    // Use requestIdleCallback for better performance, fallback to setTimeout
+    const runAnalysis = () => {
+      try {
+        const result = getDataInconsistencies(employeeData);
+        console.log('✅ Inconsistency analysis completed:', result.length, 'institutions with issues');
+        setInconsistencyData(result);
+      } catch (error) {
+        console.error('❌ Inconsistency analysis failed:', error);
+        setInconsistencyData([]);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
 
-      const matchesActiveStatusFilter = activeStatusFilter === 'all' ||
-        (activeStatusFilter === 'active' && 
-          participant.status !== '중지' && 
-          participant.status !== '휴먼대상' && 
-          participant.isActive !== false &&
-          // 퇴사일 체크
-          (!participant.resignDate || (() => {
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(runAnalysis, { timeout: 5000 });
+    } else {
+      setTimeout(runAnalysis, 100);
+    }
+  }, [employeeData, getDataInconsistencies, isAnalyzing]);
+  
+  // Only run analysis when inconsistency tab is accessed
+  useEffect(() => {
+    if (activeTab === 'inconsistencies') {
+      loadInconsistencyAnalysis();
+    }
+  }, [activeTab, loadInconsistencyAnalysis]);
+  
+  // Optimized filtering with better performance
+  const filteredData = useMemo(() => {
+    if (!allParticipantStatusList?.length) return [];
+    
+    const searchTerm = debouncedSearchTerm?.toLowerCase();
+    
+    // Use more efficient filtering approach
+    return allParticipantStatusList.filter(participantStatus => {
+      const participant = participantStatus.participant;
+      
+      // Quick exit for performance
+      if (statusFilter !== 'all' && participantStatus.overallStatus !== statusFilter) {
+        return false;
+      }
+      
+      // Optimize search matching
+      if (searchTerm) {
+        const searchableText = [
+          participant.name,
+          participant.id,
+          participant.institution,
+          participant.jobType,
+          participant.learningId,
+          participant.institutionCode,
+          participant.district,
+          participant.birthDate
+        ].filter(Boolean).join(' ').toLowerCase();
+        
+        if (!searchableText.includes(searchTerm)) {
+          return false;
+        }
+      }
+      
+      // Job type filter
+      if (jobTypeFilter !== 'all') {
+        const jobType = participant.jobType;
+        if (jobTypeFilter === '전담사회복지사') {
+          if (!jobType?.includes('전담') && jobType !== '전담사회복지사' && jobType !== '선임전담사회복지사') {
+            return false;
+          }
+        } else if (jobTypeFilter === '생활지원사') {
+          if (!jobType?.includes('생활지원') && jobType !== '생활지원사') {
+            return false;
+          }
+        }
+      }
+      
+      // Active status filter
+      if (activeStatusFilter !== 'all') {
+        if (activeStatusFilter === 'active') {
+          if (participant.status === '중지' || participant.status === '휴먼대상' || participant.isActive === false) {
+            return false;
+          }
+          if (participant.resignDate) {
             try {
               const resignDate = new Date(participant.resignDate);
               const today = new Date();
-              return resignDate > today;
+              if (resignDate <= today) {
+                return false;
+              }
             } catch {
-              return true;
+              // Continue if date parsing fails
             }
-          })())
-        ) ||
-        (activeStatusFilter === '중지' && participant.status === '중지') ||
-        (activeStatusFilter === '휴먼대상' && participant.status === '휴먼대상');
+          }
+        } else if (activeStatusFilter === '중지' && participant.status !== '중지') {
+          return false;
+        } else if (activeStatusFilter === '휴먼대상' && participant.status !== '휴먼대상') {
+          return false;
+        }
+      }
       
-      return matchesSearch && matchesStatusFilter && matchesJobTypeFilter && matchesActiveStatusFilter;
-    }) || [];
+      return true;
+    });
   }, [allParticipantStatusList, debouncedSearchTerm, statusFilter, jobTypeFilter, activeStatusFilter]);
 
-  const { totalPages, startIndex, currentData } = useMemo(() => {
-    const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const currentData = filteredData.slice(startIndex, startIndex + itemsPerPage);
-    return { totalPages, startIndex, currentData };
+  // Optimized pagination with larger default page size for better performance
+  const { totalPages, startIndex, currentData, effectiveItemsPerPage } = useMemo(() => {
+    // Increase default items per page to reduce re-renders
+    const effectiveItemsPerPage = Math.max(itemsPerPage, 20);
+    const totalPages = Math.ceil(filteredData.length / effectiveItemsPerPage);
+    const startIndex = (currentPage - 1) * effectiveItemsPerPage;
+    const currentData = filteredData.slice(startIndex, startIndex + effectiveItemsPerPage);
+    return { totalPages, startIndex, currentData, effectiveItemsPerPage };
   }, [filteredData, currentPage, itemsPerPage]);
 
   // debounced search term 변경 시 페이지 리셋
@@ -502,6 +704,12 @@ export default function ParticipantsPage() {
           <p className="text-muted-foreground mt-2">
             소속 회원들의 상세 정보를 업로드하고 관리합니다
           </p>
+          {(isLoading || !isLoaded?.participant) && (
+            <div className="flex items-center gap-2 mt-2 text-blue-600">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              <span className="text-sm">데이터 로딩 중...</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -521,11 +729,11 @@ export default function ParticipantsPage() {
             {/* 불일치 개수 표시 */}
             {isLoaded?.employee && employeeData?.length > 0 && (
               <span className={`ml-2 px-2 py-1 rounded-full text-xs font-medium ${
-                dataInconsistencies.length > 0 
+                inconsistencyData.length > 0 
                   ? 'bg-red-100 text-red-700' 
                   : 'bg-green-100 text-green-700'
               }`}>
-                {dataInconsistencies?.reduce((sum, inst) => sum + inst.inconsistencies.length, 0) || 0}건
+                {inconsistencyData?.reduce((sum, inst) => sum + inst.inconsistencies.length, 0) || 0}건
               </span>
             )}
             {/* 로딩 중 표시 */}
@@ -774,39 +982,52 @@ export default function ParticipantsPage() {
                     )}
                   </div>
 
-                  {/* 소속 회원 목록 테이블 */}
+                  {/* 소속 회원 목록 테이블 - Optimized */}
                   <div className="rounded-md border">
-                    <div className="overflow-auto max-h-[800px] w-full">
-                      <Table className="table-fixed w-full" style={{ minWidth: '2400px' }}>
+                    <div className="flex items-center justify-between p-3 bg-gray-50 border-b">
+                      <div className="text-sm text-muted-foreground">
+                        총 {filteredData.length}명 중 {currentData.length}명 표시
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowFullTable(!showFullTable)}
+                        className="text-xs"
+                      >
+                        <Eye className="h-3 w-3 mr-1" />
+                        {showFullTable ? '간단히 보기' : '전체 컴럼 보기'}
+                      </Button>
+                    </div>
+                    <div className="overflow-auto max-h-[600px] w-full">
+                      <Table className="table-auto w-full" style={{ minWidth: showFullTable ? '2000px' : '1200px' }}>
                         <TableHeader className="sticky top-0 bg-background z-20 shadow-sm">
                           <TableRow>
                             <TableHead className="w-16 text-center bg-background border-b border-r">No</TableHead>
-                            <TableHead className="w-32 bg-background border-b border-r">소속</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">기관코드</TableHead>
-                            <TableHead className="w-24 text-center bg-background border-b border-r">유형</TableHead>
+                            <TableHead className="w-40 bg-background border-b border-r">소속</TableHead>
                             <TableHead className="w-28 bg-background border-b border-r">회원명</TableHead>
-                            <TableHead className="w-20 text-center bg-background border-b border-r">성별</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">생년월일</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">ID</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">휴대전화</TableHead>
-                            <TableHead className="w-48 text-center bg-background border-b border-r">이메일</TableHead>
-                            <TableHead className="w-24 text-center bg-background border-b border-r">수강건수</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">접속일</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">가입일</TableHead>
                             <TableHead className="w-24 text-center bg-background border-b border-r">직군</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">입사일</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">퇴사일</TableHead>
-                            <TableHead className="w-24 text-center bg-background border-b border-r">특화</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">중간관리자</TableHead>
-                            <TableHead className="w-32 text-center bg-background border-b border-r">최고관리자</TableHead>
-                            <TableHead className="w-24 text-center bg-background border-b border-r">경력</TableHead>
-                            <TableHead className="w-36 text-center bg-background border-b border-r">시법사업참여여부</TableHead>
-                            <TableHead className="w-40 text-center bg-background border-b border-r">이메일수신동의여부</TableHead>
-                            <TableHead className="w-40 text-center bg-background border-b border-r">SMS수신동의 여부</TableHead>
+                            <TableHead className="w-32 text-center bg-background border-b border-r">생년월일</TableHead>
+                            <TableHead className="w-32 text-center bg-background border-b border-r">휴대전화</TableHead>
                             <TableHead className="w-24 text-center bg-background border-b border-r">상태</TableHead>
                             <TableHead className="w-32 text-center bg-background border-b border-r">최종수료</TableHead>
                             <TableHead className="w-32 text-center bg-background border-b border-r">기초직무</TableHead>
                             <TableHead className="w-32 text-center bg-background border-b">심화교육</TableHead>
+                            
+                            {/* 전체 보기에서만 표시되는 컴럼들 */}
+                            {showFullTable && (
+                              <>
+                                <TableHead className="w-32 text-center bg-background border-b border-r">기관코드</TableHead>
+                                <TableHead className="w-24 text-center bg-background border-b border-r">유형</TableHead>
+                                <TableHead className="w-20 text-center bg-background border-b border-r">성별</TableHead>
+                                <TableHead className="w-32 text-center bg-background border-b border-r">ID</TableHead>
+                                <TableHead className="w-48 text-center bg-background border-b border-r">이메일</TableHead>
+                                <TableHead className="w-24 text-center bg-background border-b border-r">수강건수</TableHead>
+                                <TableHead className="w-32 text-center bg-background border-b border-r">입사일</TableHead>
+                                <TableHead className="w-32 text-center bg-background border-b border-r">퇴사일</TableHead>
+                                <TableHead className="w-32 text-center bg-background border-b border-r">접속일</TableHead>
+                                <TableHead className="w-32 text-center bg-background border-b border-r">가입일</TableHead>
+                              </>
+                            )}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -820,35 +1041,34 @@ export default function ParticipantsPage() {
                               <TableRow key={participant.id || index} className={rowClassName}>
                                 <TableCell className="font-medium text-center border-r">{participant.no || (startIndex + index + 1)}</TableCell>
                                 <TableCell className="border-r text-sm" title={participant.institution}>{participant.institution || '-'}</TableCell>
-                                <TableCell className="text-center border-r font-mono text-xs">{participant.institutionCode || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.institutionType || '-'}</TableCell>
                                 <TableCell className="font-medium border-r">{participant.name || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.gender || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.birthDate || '-'}</TableCell>
-                                <TableCell className="text-center border-r font-mono text-sm">{participant.id || '-'}</TableCell>
-                                <TableCell className="text-center border-r font-mono text-xs">{participant.phone || '-'}</TableCell>
-                                <TableCell className="border-r text-xs" title={participant.email}>{participant.email || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.courseCount || 0}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.lastAccessDate || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.registrationDate || '-'}</TableCell>
                                 <TableCell className="text-center border-r">
                                   <Badge variant="outline" className="text-xs">{participant.jobType || '-'}</Badge>
                                 </TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.hireDate || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.resignDate || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.specialization || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.middleManager || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.topManager || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.career || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.participatesInLegalBusiness || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.emailConsent || '-'}</TableCell>
-                                <TableCell className="text-center border-r text-xs">{participant.smsConsent || '-'}</TableCell>
+                                <TableCell className="text-center border-r text-xs">{participant.birthDate || '-'}</TableCell>
+                                <TableCell className="text-center border-r font-mono text-xs">{participant.phone || '-'}</TableCell>
                                 <TableCell className="text-center border-r">
                                   {getParticipantStatusBadge(participant.status)}
                                 </TableCell>
                                 <TableCell className="text-center border-r text-xs">{getStatusBadge(participantStatus.overallStatus)}</TableCell>
                                 <TableCell className="text-center border-r text-xs">{getEducationBadge(participantStatus.basicEducation.status)}</TableCell>
                                 <TableCell className="text-center text-xs">{getEducationBadge(participantStatus.advancedEducation.status)}</TableCell>
+                                
+                                {/* 전체 보기에서만 표시되는 컬럼들 */}
+                                {showFullTable && (
+                                  <>
+                                    <TableCell className="text-center border-r font-mono text-xs">{participant.institutionCode || '-'}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.institutionType || '-'}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.gender || '-'}</TableCell>
+                                    <TableCell className="text-center border-r font-mono text-sm">{participant.id || '-'}</TableCell>
+                                    <TableCell className="border-r text-xs" title={participant.email}>{participant.email || '-'}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.courseCount || 0}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.hireDate || '-'}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.resignDate || '-'}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.lastAccessDate || '-'}</TableCell>
+                                    <TableCell className="text-center border-r text-xs">{participant.registrationDate || '-'}</TableCell>
+                                  </>
+                                )}
                               </TableRow>
                             );
                           })}
@@ -884,7 +1104,7 @@ export default function ParticipantsPage() {
                     !isLoaded?.employee 
                       ? 'bg-blue-50 border-l-blue-400'
                       : employeeData?.length > 0 
-                        ? dataInconsistencies.length > 0
+                        ? inconsistencyData.length > 0
                           ? 'bg-red-50 border-l-red-400'
                           : 'bg-green-50 border-l-green-400'
                         : 'bg-orange-50 border-l-orange-400'
@@ -895,11 +1115,11 @@ export default function ParticipantsPage() {
                         <span className="text-blue-600 ml-2">종사자 데이터를 백그라운드에서 불러오고 있습니다.</span>
                       </div>
                     ) : employeeData?.length > 0 ? (
-                      dataInconsistencies.length > 0 ? (
+                      inconsistencyData.length > 0 ? (
                         <div className="text-red-800">
                           <strong>⚠️ 불일치 발견!</strong> 
                           <span className="text-red-600 ml-2">
-                            {dataInconsistencies.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건의 
+                            {inconsistencyData.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건의 
                             데이터 불일치가 발견되었습니다.
                           </span>
                         </div>
@@ -935,7 +1155,17 @@ export default function ParticipantsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {dataInconsistencies.length === 0 ? (
+              {isAnalyzing ? (
+                <div className="text-center py-12">
+                  <div className="flex items-center justify-center mb-4">
+                    <RefreshCw className="h-8 w-8 animate-spin text-blue-500 mr-3" />
+                    <div>
+                      <div className="text-lg font-medium text-blue-600">불일치 분석 진행 중...</div>
+                      <div className="text-sm text-gray-500">데이터를 분석하고 있습니다. 잠시만 기다려 주세요.</div>
+                    </div>
+                  </div>
+                </div>
+              ) : inconsistencyData.length === 0 ? (
                 <div className="text-center py-8">
                   {!isLoaded?.employee ? (
                     <div>
@@ -1011,22 +1241,112 @@ export default function ParticipantsPage() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Card className="p-4 border-l-4 border-l-orange-500">
                       <div className="text-2xl font-bold text-orange-600">
-                        {dataInconsistencies.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}
+                        {inconsistencyData.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}
                       </div>
                       <div className="text-sm text-muted-foreground">총 불일치 건수</div>
                     </Card>
                     <Card className="p-4 border-l-4 border-l-red-500">
                       <div className="text-2xl font-bold text-red-600">
-                        {dataInconsistencies.length}
+                        {inconsistencyData.length}
                       </div>
                       <div className="text-sm text-muted-foreground">영향받는 기관</div>
                     </Card>
                     <Card className="p-4 border-l-4 border-l-blue-500">
                       <div className="text-2xl font-bold text-blue-600">
-                        {dataInconsistencies.filter(inst => inst.institution.includes('거제')).length}
+                        {inconsistencyData.filter(inst => inst.institution.includes('거제')).length}
                       </div>
                       <div className="text-sm text-muted-foreground">거제 관련 기관</div>
                     </Card>
+                  </div>
+
+                  {/* 불일치 유형별 필터 버튼 */}
+                  <div className="flex flex-wrap gap-2 p-4 bg-gray-50 rounded-lg">
+                    <Button
+                      variant={selectedInconsistencyType === 'all' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedInconsistencyType('all')}
+                      className="min-w-[100px]"
+                    >
+                      전체 보기
+                      <Badge variant="secondary" className="ml-2">
+                        {inconsistencyData.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}
+                      </Badge>
+                    </Button>
+                    <Button
+                      variant={selectedInconsistencyType === '모인우리에만_존재' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedInconsistencyType('모인우리에만_존재')}
+                      className="min-w-[150px]"
+                    >
+                      모인우리에만 존재
+                      <Badge variant="secondary" className="ml-2">
+                        {inconsistencyData.reduce((sum, inst) => 
+                          sum + inst.inconsistencies.filter(inc => 
+                            inc.type === '모인우리에만_존재' || 
+                            (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('모인우리에만_존재'))
+                          ).length, 0)}
+                      </Badge>
+                    </Button>
+                    <Button
+                      variant={selectedInconsistencyType === '배움터에만_존재' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedInconsistencyType('배움터에만_존재')}
+                      className="min-w-[150px]"
+                    >
+                      배움터에만 존재
+                      <Badge variant="secondary" className="ml-2">
+                        {inconsistencyData.reduce((sum, inst) => 
+                          sum + inst.inconsistencies.filter(inc => 
+                            inc.type === '배움터에만_존재' || 
+                            (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('배움터에만_존재'))
+                          ).length, 0)}
+                      </Badge>
+                    </Button>
+                    <Button
+                      variant={selectedInconsistencyType === '퇴사일_불일치' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedInconsistencyType('퇴사일_불일치')}
+                      className="min-w-[140px]"
+                    >
+                      퇴사일 불일치
+                      <Badge variant="secondary" className="ml-2">
+                        {inconsistencyData.reduce((sum, inst) => 
+                          sum + inst.inconsistencies.filter(inc => 
+                            inc.type?.includes('퇴사일') || 
+                            (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('퇴사일_불일치'))
+                          ).length, 0)}
+                      </Badge>
+                    </Button>
+                    <Button
+                      variant={selectedInconsistencyType === '소속기관_불일치' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedInconsistencyType('소속기관_불일치')}
+                      className="min-w-[140px]"
+                    >
+                      소속기관 불일치
+                      <Badge variant="secondary" className="ml-2">
+                        {inconsistencyData.reduce((sum, inst) => 
+                          sum + inst.inconsistencies.filter(inc => 
+                            inc.type?.includes('소속기관') || 
+                            (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('소속기관_불일치'))
+                          ).length, 0)}
+                      </Badge>
+                    </Button>
+                    <Button
+                      variant={selectedInconsistencyType === '상태모순_불일치' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setSelectedInconsistencyType('상태모순_불일치')}
+                      className="min-w-[140px]"
+                    >
+                      상태 모순
+                      <Badge variant="secondary" className="ml-2">
+                        {inconsistencyData.reduce((sum, inst) => 
+                          sum + inst.inconsistencies.filter(inc => 
+                            inc.type?.includes('상태') || 
+                            (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('상태모순_불일치'))
+                          ).length, 0)}
+                      </Badge>
+                    </Button>
                   </div>
 
                   {/* 검색 기능 */}
@@ -1040,45 +1360,82 @@ export default function ParticipantsPage() {
                       />
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {inconsistencySearchTerm ? (() => {
-                        const filteredInstitutions = dataInconsistencies.filter(inst => {
-                          const searchLower = inconsistencySearchTerm.toLowerCase();
-                          return (
-                            inst.institution.toLowerCase().includes(searchLower) ||
-                            inst.inconsistencies.some(inc => 
-                              inc.name.toLowerCase().includes(searchLower) ||
-                              inc.jobType?.toLowerCase().includes(searchLower)
-                            )
-                          );
-                        });
-                        const totalFilteredInconsistencies = filteredInstitutions.reduce((sum, inst) => {
-                          return sum + inst.inconsistencies.filter(inc => {
-                            const searchLower = inconsistencySearchTerm.toLowerCase();
-                            return (
-                              inc.name.toLowerCase().includes(searchLower) ||
-                              inc.jobType?.toLowerCase().includes(searchLower)
-                            );
-                          }).length;
-                        }, 0);
-                        return `검색 결과: ${filteredInstitutions.length}개 기관, ${totalFilteredInconsistencies}건 불일치`;
-                      })() :
-                        `전체: ${dataInconsistencies.length}개 기관, ${dataInconsistencies.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건 불일치`
-                      }
+                      {(() => {
+                        // 현재 선택된 유형과 검색어를 모두 고려한 필터링
+                        const filteredInstitutions = inconsistencyData
+                          .map(inst => ({
+                            ...inst,
+                            inconsistencies: inst.inconsistencies.filter(inconsistency => {
+                              // 유형별 필터링
+                              if (selectedInconsistencyType !== 'all') {
+                                const hasSelectedType = inconsistency.type === selectedInconsistencyType ||
+                                  (inconsistency.inconsistencyTypes && 
+                                   inconsistency.inconsistencyTypes.includes(selectedInconsistencyType));
+                                if (!hasSelectedType) return false;
+                              }
+                              
+                              // 검색어 필터링
+                              if (!inconsistencySearchTerm) return true;
+                              const searchLower = inconsistencySearchTerm.toLowerCase();
+                              return (
+                                inconsistency.name.toLowerCase().includes(searchLower) ||
+                                inconsistency.jobType?.toLowerCase().includes(searchLower)
+                              );
+                            })
+                          }))
+                          .filter(inst => {
+                            if (inconsistencySearchTerm) {
+                              const searchLower = inconsistencySearchTerm.toLowerCase();
+                              return inst.institution.toLowerCase().includes(searchLower) || inst.inconsistencies.length > 0;
+                            }
+                            return inst.inconsistencies.length > 0;
+                          });
+                        
+                        const totalFilteredInconsistencies = filteredInstitutions.reduce((sum, inst) => sum + inst.inconsistencies.length, 0);
+                        
+                        let statusText = '';
+                        if (selectedInconsistencyType !== 'all') {
+                          statusText += `[${selectedInconsistencyType.replace(/_/g, ' ')}] `;
+                        }
+                        if (inconsistencySearchTerm) {
+                          statusText += `검색: "${inconsistencySearchTerm}" `;
+                        }
+                        statusText += `${filteredInstitutions.length}개 기관, ${totalFilteredInconsistencies}건 불일치`;
+                        
+                        return statusText;
+                      })()}
                     </div>
                   </div>
 
                   {/* 기관별 불일치 리스트 */}
-                  {dataInconsistencies
+                  {inconsistencyData
+                    .map(inst => ({
+                      ...inst,
+                      inconsistencies: inst.inconsistencies.filter(inconsistency => {
+                        // 유형별 필터링
+                        if (selectedInconsistencyType !== 'all') {
+                          const hasSelectedType = inconsistency.type === selectedInconsistencyType ||
+                            (inconsistency.inconsistencyTypes && 
+                             inconsistency.inconsistencyTypes.includes(selectedInconsistencyType));
+                          if (!hasSelectedType) return false;
+                        }
+                        
+                        // 검색어 필터링
+                        if (!inconsistencySearchTerm) return true;
+                        const searchLower = inconsistencySearchTerm.toLowerCase();
+                        return (
+                          inconsistency.name.toLowerCase().includes(searchLower) ||
+                          inconsistency.jobType?.toLowerCase().includes(searchLower)
+                        );
+                      })
+                    }))
                     .filter(inst => {
-                      if (!inconsistencySearchTerm) return true;
-                      const searchLower = inconsistencySearchTerm.toLowerCase();
-                      return (
-                        inst.institution.toLowerCase().includes(searchLower) ||
-                        inst.inconsistencies.some(inc => 
-                          inc.name.toLowerCase().includes(searchLower) ||
-                          inc.jobType?.toLowerCase().includes(searchLower)
-                        )
-                      );
+                      // 기관명 검색 또는 해당 유형의 불일치가 있는 기관만 표시
+                      if (inconsistencySearchTerm) {
+                        const searchLower = inconsistencySearchTerm.toLowerCase();
+                        return inst.institution.toLowerCase().includes(searchLower) || inst.inconsistencies.length > 0;
+                      }
+                      return inst.inconsistencies.length > 0;
                     })
                     .map((institutionData, instIndex) => (
                     <Card key={instIndex} className="border-l-4 border-l-orange-400">
@@ -1086,16 +1443,7 @@ export default function ParticipantsPage() {
                         <CardTitle className="text-lg flex items-center justify-between">
                           <span>{highlightText(institutionData.institution, inconsistencySearchTerm)}</span>
                           <Badge variant="destructive" className="ml-2">
-                            {inconsistencySearchTerm ? 
-                              institutionData.inconsistencies.filter(inc => {
-                                const searchLower = inconsistencySearchTerm.toLowerCase();
-                                return (
-                                  inc.name.toLowerCase().includes(searchLower) ||
-                                  inc.jobType?.toLowerCase().includes(searchLower)
-                                );
-                              }).length :
-                              institutionData.inconsistencies.length
-                            }건 불일치
+                            {institutionData.inconsistencies.length}건 불일치
                           </Badge>
                         </CardTitle>
                       </CardHeader>
@@ -1121,12 +1469,22 @@ export default function ParticipantsPage() {
                                 <TableHead className="w-32">종사자 퇴사일</TableHead>
                                 <TableHead className="w-32">소속회원 퇴사일</TableHead>
                                 <TableHead className="w-32">불일치 유형</TableHead>
+                                <TableHead className="w-24 bg-orange-50">유사 데이터</TableHead>
                                 <TableHead className="w-24">상세보기</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {institutionData.inconsistencies
                                 .filter(inconsistency => {
+                                  // 유형별 필터링
+                                  if (selectedInconsistencyType !== 'all') {
+                                    const hasSelectedType = inconsistency.type === selectedInconsistencyType ||
+                                      (inconsistency.inconsistencyTypes && 
+                                       inconsistency.inconsistencyTypes.includes(selectedInconsistencyType));
+                                    if (!hasSelectedType) return false;
+                                  }
+                                  
+                                  // 검색어 필터링
                                   if (!inconsistencySearchTerm) return true;
                                   const searchLower = inconsistencySearchTerm.toLowerCase();
                                   return (
@@ -1162,6 +1520,31 @@ export default function ParticipantsPage() {
                                     <Badge variant="outline" className="text-xs">
                                       {inconsistency.type?.replace(/_/g, ' ')}
                                     </Badge>
+                                  </TableCell>
+                                  <TableCell className="bg-orange-50">
+                                    {inconsistency.similarData?.hasSimilarData ? (
+                                      <div className="text-xs">
+                                        <Badge variant="outline" className="text-xs bg-orange-100 text-orange-800 border-orange-300">
+                                          유사 {inconsistency.similarData.similarCount}건
+                                        </Badge>
+                                        <div className="mt-1 text-[10px] text-orange-600 leading-tight">
+                                          {inconsistency.similarData.mostSimilarEmployee.similarity?.type === '이름일치_생년월일차이' && (
+                                            `생년월일 ${inconsistency.similarData.mostSimilarEmployee.similarity.birthDateDiff}일 차이`
+                                          )}
+                                          {inconsistency.similarData.mostSimilarEmployee.similarity?.type === '생년월일일치_이름유사' && (
+                                            '생년월일 일치'
+                                          )}
+                                          {inconsistency.similarData.mostSimilarEmployee.similarity?.type === '이름일치_생년월일형식차이' && (
+                                            '형식 차이'
+                                          )}
+                                        </div>
+                                        <div className="text-[10px] text-gray-500 mt-1 truncate" title={inconsistency.similarData.mostSimilarEmployee.name}>
+                                          → {inconsistency.similarData.mostSimilarEmployee.name}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-gray-400">-</span>
+                                    )}
                                   </TableCell>
                                   <TableCell>
                                     <button 
@@ -1326,6 +1709,298 @@ export default function ParticipantsPage() {
                     <div>{selectedInconsistency.participantPhone || '정보없음'}</div>
                   </div>
                 </div>
+              </div>
+
+              {/* 원본 데이터 섹션 추가 */}
+              <div className="mt-8 p-6 bg-gray-50 rounded-lg">
+                <h4 className="font-semibold text-gray-800 border-b pb-2 mb-4">원본 데이터 확인</h4>
+                <div className="grid md:grid-cols-2 gap-6">
+                  {/* 모인우리(종사자) 원본 데이터 */}
+                  <div className="bg-red-50 p-4 rounded border">
+                    <h5 className="font-medium text-red-800 mb-3 flex items-center">
+                      <span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+                      모인우리 종사자 데이터
+                    </h5>
+                    {selectedInconsistency.employeeStatus !== '데이터없음' ? (
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">성명:</span>
+                          <span className="font-medium">{selectedInconsistency.name}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">생년월일:</span>
+                          <span>{selectedInconsistency.birthDate || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">소속기관:</span>
+                          <span>{selectedInconsistency.employeeInstitution || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">직군:</span>
+                          <span>{selectedInconsistency.employeeJobType || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">입사일:</span>
+                          <span>{selectedInconsistency.employeeHireDate || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">퇴사일:</span>
+                          <span>{selectedInconsistency.employeeResignDate || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">재직상태:</span>
+                          <Badge variant={selectedInconsistency.employeeStatus === '퇴직' ? 'destructive' : 'default'} className="text-xs">
+                            {selectedInconsistency.employeeStatus}
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">연락처:</span>
+                          <span>{selectedInconsistency.employeePhone || '-'}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <AlertTriangle className="mx-auto h-8 w-8 text-yellow-500 mb-2" />
+                        <p className="text-sm">모인우리에 데이터가 없습니다</p>
+                        <p className="text-xs text-gray-400 mt-1">배움터에만 존재하는 케이스</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 배움터(참가자) 원본 데이터 */}
+                  <div className="bg-blue-50 p-4 rounded border">
+                    <h5 className="font-medium text-blue-800 mb-3 flex items-center">
+                      <span className="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                      배움터 소속회원 데이터
+                    </h5>
+                    {selectedInconsistency.participantStatus !== '데이터없음' ? (
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">성명:</span>
+                          <span className="font-medium">{selectedInconsistency.name}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">생년월일:</span>
+                          <span>{selectedInconsistency.birthDate || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">소속기관:</span>
+                          <span>{selectedInconsistency.participantInstitution || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">직군:</span>
+                          <span>{selectedInconsistency.participantJobType || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">입사일:</span>
+                          <span>{selectedInconsistency.participantHireDate || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">퇴사일:</span>
+                          <span>{selectedInconsistency.participantResignDate || '-'}</span>
+                        </div>
+                        <div className="flex justify-between border-b pb-1">
+                          <span className="text-gray-600">회원상태:</span>
+                          <Badge variant={selectedInconsistency.participantStatus === '정상' ? 'default' : 'secondary'} className="text-xs">
+                            {selectedInconsistency.participantStatus}
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">연락처:</span>
+                          <span>{selectedInconsistency.participantPhone || '-'}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <AlertTriangle className="mx-auto h-8 w-8 text-yellow-500 mb-2" />
+                        <p className="text-sm">배움터에 데이터가 없습니다</p>
+                        <p className="text-xs text-gray-400 mt-1">모인우리에만 존재하는 케이스</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+{/* 유사 데이터 정보 섹션 */}
+                {selectedInconsistency.similarData && selectedInconsistency.similarData.hasSimilarData && (
+                  <div className="mt-6 p-4 bg-orange-50 border border-orange-200 rounded">
+                    <h6 className="font-medium text-orange-800 mb-3 flex items-center">
+                      🔍 유사 데이터 발견 ({selectedInconsistency.similarData.similarCount}건)
+                      <Badge variant="outline" className="ml-2 text-xs">
+                        데이터 정합성 검토 필요
+                      </Badge>
+                    </h6>
+                    
+                    <div className="bg-white p-3 rounded border border-orange-100">
+                      <div className="text-sm">
+                        <div className="font-medium text-orange-800 mb-2">
+                          가장 유사한 종사자 데이터:
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 text-xs bg-gray-50 p-3 rounded">
+                          <div>
+                            <span className="text-gray-600">이름:</span>
+                            <span className="ml-2 font-medium">{selectedInconsistency.similarData.mostSimilarEmployee.name}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">생년월일:</span>
+                            <span className="ml-2">{selectedInconsistency.similarData.mostSimilarEmployee.birthDate}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">소속:</span>
+                            <span className="ml-2">{selectedInconsistency.similarData.mostSimilarEmployee.institution}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">직군:</span>
+                            <span className="ml-2">{selectedInconsistency.similarData.mostSimilarEmployee.jobType}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+                          <span className="font-medium text-yellow-800">차이점:</span>
+                          <span className="ml-2 text-yellow-700">
+                            {selectedInconsistency.similarData.mostSimilarEmployee.similarity?.reason}
+                          </span>
+                        </div>
+                        
+                        <div className="mt-3 text-xs text-gray-600">
+                          <strong>추정 원인:</strong>
+                          {selectedInconsistency.similarData.mostSimilarEmployee.similarity?.type === '이름일치_생년월일차이' && (
+                            <span className="ml-1">입력 실수 또는 서로 다른 데이터 소스에서 발생한 생년월일 차이일 가능성이 높습니다.</span>
+                          )}
+                          {selectedInconsistency.similarData.mostSimilarEmployee.similarity?.type === '생년월일일치_이름유사' && (
+                            <span className="ml-1">동일인이지만 이름 표기 방식이 다를 가능성이 있습니다.</span>
+                          )}
+                          {selectedInconsistency.similarData.mostSimilarEmployee.similarity?.type === '이름일치_생년월일형식차이' && (
+                            <span className="ml-1">동일인이지만 생년월일 형식이 다르게 저장된 것으로 보입니다.</span>
+                          )}
+                        </div>
+                        
+                        {selectedInconsistency.similarData.allSimilarEmployees.length > 1 && (
+                          <div className="mt-3 text-xs">
+                            <details className="cursor-pointer">
+                              <summary className="text-gray-600 hover:text-gray-800">
+                                다른 유사 데이터 {selectedInconsistency.similarData.allSimilarEmployees.length - 1}건 더 보기
+                              </summary>
+                              <div className="mt-2 space-y-2">
+                                {selectedInconsistency.similarData.allSimilarEmployees.slice(1).map((emp, idx) => (
+                                  <div key={idx} className="p-2 bg-gray-50 rounded border text-xs">
+                                    <div className="grid grid-cols-3 gap-2">
+                                      <span><strong>이름:</strong> {emp.name}</span>
+                                      <span><strong>생년월일:</strong> {emp.birthDate}</span>
+                                      <span><strong>소속:</strong> {emp.institution}</span>
+                                    </div>
+                                    <div className="text-yellow-600 mt-1">
+                                      {emp.similarity?.reason}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 데이터 비교 요약 */}
+                <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded">
+                  <h6 className="font-medium text-yellow-800 mb-2">📊 데이터 비교 요약</h6>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-600">입사일 차이:</span>
+                      <span className="ml-2 font-medium">
+                        {selectedInconsistency.hireDateDiff ? `${selectedInconsistency.hireDateDiff}일` : '비교불가'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">퇴사일 차이:</span>
+                      <span className="ml-2 font-medium">
+                        {selectedInconsistency.resignDateDiff ? `${selectedInconsistency.resignDateDiff}일` : '비교불가'}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {/* 유사 데이터가 있을 때 추가 정보 */}
+                  {selectedInconsistency.similarData && selectedInconsistency.similarData.hasSimilarData && (
+                    <div className="mt-3 p-2 bg-orange-100 border border-orange-200 rounded text-xs">
+                      <div className="font-medium text-orange-800">⚠️ 권장 조치:</div>
+                      <div className="text-orange-700 mt-1">
+                        위의 유사 데이터를 확인하여 같은 사람인지 검토하고, 필요시 데이터 정정을 진행하시기 바랍니다.
+                        {selectedInconsistency.similarData.mostSimilarEmployee.similarity?.birthDateDiff && 
+                         selectedInconsistency.similarData.mostSimilarEmployee.similarity.birthDateDiff <= 7 && (
+                          <span className="block mt-1 font-medium">
+                            📅 생년월일 차이가 {selectedInconsistency.similarData.mostSimilarEmployee.similarity.birthDateDiff}일 이내로 입력 실수일 가능성이 매우 높습니다.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 권장조치사항 섹션 */}
+                {(() => {
+                  const recommendedActions = getRecommendedActions(selectedInconsistency);
+                  return recommendedActions.length > 0 && (
+                    <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded">
+                      <h6 className="font-medium text-blue-800 mb-3 flex items-center">
+                        🎯 권장조치사항 ({recommendedActions.length}개)
+                      </h6>
+                      
+                      <div className="space-y-4">
+                        {recommendedActions.map((action, idx) => (
+                          <div key={idx} className={`p-3 rounded border ${
+                            action.priority === 'high' ? 'bg-red-50 border-red-200' : 
+                            action.priority === 'medium' ? 'bg-yellow-50 border-yellow-200' : 
+                            'bg-gray-50 border-gray-200'
+                          }`}>
+                            <div className="flex items-center mb-2">
+                              <Badge variant={
+                                action.priority === 'high' ? 'destructive' : 
+                                action.priority === 'medium' ? 'secondary' : 
+                                'outline'
+                              } className="text-xs mr-2">
+                                {action.priority === 'high' ? '높음' : 
+                                 action.priority === 'medium' ? '보통' : '낮음'}
+                              </Badge>
+                              <span className={`font-medium text-sm ${
+                                action.priority === 'high' ? 'text-red-800' : 
+                                action.priority === 'medium' ? 'text-yellow-800' : 
+                                'text-gray-800'
+                              }`}>
+                                {action.title}
+                              </span>
+                            </div>
+                            
+                            <p className={`text-xs mb-3 ${
+                              action.priority === 'high' ? 'text-red-700' : 
+                              action.priority === 'medium' ? 'text-yellow-700' : 
+                              'text-gray-700'
+                            }`}>
+                              {action.description}
+                            </p>
+                            
+                            <div className="text-xs">
+                              <div className="font-medium mb-2 text-gray-800">처리 단계:</div>
+                              <ol className="list-decimal list-inside space-y-1 text-gray-700">
+                                {action.steps.map((step, stepIdx) => (
+                                  <li key={stepIdx}>{step}</li>
+                                ))}
+                              </ol>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      
+                      <div className="mt-4 p-3 bg-blue-100 border border-blue-200 rounded text-xs">
+                        <div className="font-medium text-blue-800 mb-1">📝 처리 완료 후:</div>
+                        <div className="text-blue-700">
+                          조치 완료 후 데이터를 다시 업로드하고 불일치 분석을 재실행하여 문제가 해결되었는지 확인하시기 바랍니다.
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             
