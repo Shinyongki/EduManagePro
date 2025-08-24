@@ -3,5 +3,6 @@ dist
 .DS_Store
 server/public
 vite.config.ts.*
-*.tar.gzdist-electron/
+*.tar.gz
+dist-electron/
 dist-electron-working/

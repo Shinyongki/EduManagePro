@@ -425,12 +425,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const worksheet = workbook.Sheets[sheetName];
       const data = XLSX.utils.sheet_to_json(worksheet);
 
-      let processedCount = 0;
+      const validParticipants: any[] = [];
       const errors: string[] = [];
+      let processedCount = 0;
 
       console.log('업로드된 데이터 샘플:', data.slice(0, 2));
       console.log('첫 번째 행 키들:', Object.keys(data[0] || {}));
 
+      // First pass: validate and prepare all participants
       for (const row of data as any[]) {
         try {
           // 엑셀 헤더가 __EMPTY 형태로 파싱되는 문제 해결
@@ -483,11 +485,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             id: participant.id
           });
 
-          await storage.saveEducationParticipant(participant);
+          validParticipants.push(participant);
           processedCount++;
         } catch (error) {
           errors.push(`Row ${processedCount + 1}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
+      }
+
+      // Second pass: batch save all valid participants
+      if (validParticipants.length > 0) {
+        console.log(`Batch saving ${validParticipants.length} participants...`);
+        await storage.batchSaveEducationParticipants(validParticipants);
       }
 
       res.json({
@@ -1552,8 +1560,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             columnMapping.learningId = index;
           } else if (cleanHeader.includes('수정일')) {
             columnMapping.modifiedDate = index;
+          } else if (cleanHeader.includes('담당업무')) {
+            columnMapping.mainDuty = index; // 담당업무를 mainDuty에 매핑
           } else if (cleanHeader.includes('주요업무')) {
-            columnMapping.mainDuty = index;
+            // 주요업무는 별도 처리하지 않음
           }
         });
         
@@ -1606,7 +1616,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // 직무구분 제외
             !trimmed.includes('전담') && !trimmed.includes('생활지원') && !trimmed.includes('선임') &&
             // 업무구분 제외
-            !trimmed.includes('일반') && !trimmed.includes('중점') && !trimmed.includes('및') &&
+            !trimmed.includes('일반') && !trimmed.includes('중점') && !trimmed.includes('및') && 
+            !trimmed.includes('특화') &&
             // 기타 제외
             !trimmed.includes('년이상') && !trimmed.includes('미만')
         });
@@ -1614,6 +1625,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (actualNameIndex >= 0) {
           name = cellValues[actualNameIndex];
           console.log(`동적 매핑: ${name} (위치 ${actualNameIndex})`);
+        } else {
+          // 특화가 이름 자리에 있는 경우 특별 처리
+          const namePosition = columnMapping.name || 2;
+          if (cellValues[namePosition] === '특화' && cellValues[namePosition + 1]) {
+            const nextCell = cellValues[namePosition + 1].trim();
+            if (nextCell.length >= 2 && nextCell.length <= 4 && /^[가-힣]+$/.test(nextCell)) {
+              name = nextCell;
+              actualNameIndex = namePosition + 1;
+              console.log(`특화 밀림 보정: ${name} (위치 ${actualNameIndex})`);
+            }
+          }
         }
       } else {
         // 컬럼 수가 같은 경우: 기존 헤더 매핑 사용
@@ -1687,6 +1709,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // 동적 매핑이 적용된 경우 해당 위치 기준으로 데이터 추출
       let employee;
       if (actualNameIndex >= 0) {
+        // 특화 밀림 보정인지 확인
+        const isSpecializedShift = cellValues[columnMapping.name || 2] === '특화';
+        const dutyValue = isSpecializedShift ? '특화' : (cellValues[6] || '');
+        
         // 동적 매핑으로 생성
         employee = {
           id: `employee_${Date.now()}_${Math.random().toString(36).substring(2)}`,
@@ -1697,7 +1723,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           regionName: cellValues[3] || '',
           institutionCode: cellValues[4] || '',
           jobType: cellValues[5] || '',
-          responsibility: cellValues[6] || '',
+          responsibility: dutyValue,
           careerType: cellValues[actualNameIndex + 1] || '',
           birthDate: cellValues[actualNameIndex + 2] || '',
           gender: cellValues[actualNameIndex + 3] || '',
@@ -1706,11 +1732,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           notes: cellValues[actualNameIndex + 6] || '',
           learningId: cellValues[actualNameIndex + 7] || '',
           modifiedDate: cellValues[actualNameIndex + 8] || '',
-          mainDuty: cellValues[actualNameIndex + 9] || '',
+          mainDuty: dutyValue,
           angelCode: '',
           institution: cellValues[3] || '',
           province: cellValues[0] || '',
-          duty: cellValues[6] || '',
+          duty: dutyValue,
           remarks: cellValues[actualNameIndex + 6] || '',
           note: cellValues[actualNameIndex + 6] || '',
           primaryWork: cellValues[actualNameIndex + 9] || '',
@@ -2264,12 +2290,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 if (!institutionCode) institutionCode = cellValue;
               } else if (header === '담당업무') {
                 responsibility = cellValue;
+                mainDuty = cellValue; // 담당업무를 mainDuty에도 매핑
               } else if (header.includes('배움터') && header.includes('id')) {
                 learningId = cellValue;
               } else if (header.includes('수정일')) {
                 modifiedDate = cellValue;
               } else if (header === '주요업무') {
-                mainDuty = cellValue;
+                // 주요업무는 별도로 처리하지 않고 담당업무를 우선
               }
             }
 
@@ -2870,6 +2897,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       res.status(500).json({ error: "Failed to generate dashboard statistics" });
     }
+  });
+
+  // 디버그 로그 API
+  app.post("/api/debug-log", (req, res) => {
+    const { message } = req.body;
+    console.log(`🔍 CLIENT DEBUG: ${message}`);
+    res.json({ success: true });
   });
 
   const httpServer = createServer(app);

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Upload, List, Eye, Award, BarChart3, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Upload, List, Eye, Award, BarChart3, RefreshCw, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { Link } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -64,7 +64,7 @@ interface IntegratedAnalysisData {
 }
 
 export default function AdvancedEducationPage() {
-  const [activeTab, setActiveTab] = useState('upload');
+  const [showUploadSection, setShowUploadSection] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -325,46 +325,61 @@ export default function AdvancedEducationPage() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="upload">
-            <Upload className="h-4 w-4 mr-2" />
-            데이터 업로드
-          </TabsTrigger>
-          <TabsTrigger value="list">
-            <List className="h-4 w-4 mr-2" />
-            데이터 목록 ({advancedEducationData.length})
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="upload" className="mt-6">
-          <div className="space-y-6">
-            <DateUploadForm
-              onUpload={handleDateUpload}
-              isUploading={isUploading}
-              title="심화교육 데이터 업로드"
-              description="Excel 파일을 통해 심화교육 수료 데이터를 특정 날짜 기준으로 업로드합니다"
-            />
-          </div>
-          
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">데이터 관리</CardTitle>
-              <CardDescription>심화 교육 데이터를 관리합니다</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button
-                variant="destructive"
-                onClick={handleClearData}
-                disabled={isLoading || !advancedEducationData || advancedEducationData.length === 0}
-              >
-                데이터 초기화
-              </Button>
+      {/* 데이터 업로드 섹션 (Collapsible) */}
+      <Collapsible open={showUploadSection} onOpenChange={setShowUploadSection}>
+        <Card className="mb-6">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  데이터 업로드
+                </CardTitle>
+                <CardDescription>
+                  Excel 파일을 통해 심화교육 수료 데이터를 업로드합니다
+                </CardDescription>
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  {showUploadSection ? (
+                    <>
+                      <ChevronUp className="h-4 w-4 mr-2" />
+                      접기
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4 mr-2" />
+                      펼치기
+                    </>
+                  )}
+                </Button>
+              </CollapsibleTrigger>
+            </div>
+          </CardHeader>
+          <CollapsibleContent>
+            <CardContent className="space-y-6">
+              <DateUploadForm
+                onUpload={handleDateUpload}
+                isUploading={isUploading}
+                title="심화교육 데이터 업로드"
+                description="Excel 파일을 통해 심화교육 수료 데이터를 특정 날짜 기준으로 업로드합니다"
+              />
+              
+              <div className="pt-4 border-t">
+                <Button
+                  variant="destructive"
+                  onClick={handleClearData}
+                  disabled={isLoading || !advancedEducationData || advancedEducationData.length === 0}
+                >
+                  데이터 초기화
+                </Button>
+              </div>
             </CardContent>
-          </Card>
-        </TabsContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
-        <TabsContent value="list" className="mt-6">
+      {/* 데이터 목록 섹션 (메인) */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -377,15 +392,25 @@ export default function AdvancedEducationPage() {
                     업로드된 심화 교육 수료 데이터를 조회합니다
                   </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={fetchAdvancedEducationData}
-                  disabled={isLoading}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                  새로고침
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowUploadSection(!showUploadSection)}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    데이터 업로드
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={fetchAdvancedEducationData}
+                    disabled={isLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                    새로고침
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -402,7 +427,7 @@ export default function AdvancedEducationPage() {
                   <Button 
                     variant="outline" 
                     className="mt-4"
-                    onClick={() => setActiveTab('upload')}
+                    onClick={() => setShowUploadSection(true)}
                   >
                     데이터 업로드하기
                   </Button>
@@ -624,8 +649,6 @@ export default function AdvancedEducationPage() {
               })()}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

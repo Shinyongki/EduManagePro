@@ -73,6 +73,8 @@ export interface IStorage {
   saveAnalysisResults(results: AnalysisResult[]): Promise<void>;
   getEducationParticipants(): Promise<EducationParticipant[]>;
   saveEducationParticipant(participant: EducationParticipant): Promise<void>;
+  saveEducationParticipants(participants: EducationParticipant[]): Promise<void>;
+  batchSaveEducationParticipants(participants: EducationParticipant[]): Promise<void>;
   updateEducationParticipant(id: string, participant: Partial<EducationParticipant>): Promise<void>;
   deleteEducationParticipant(id: string): Promise<void>;
   clearAllParticipants(): Promise<void>;
@@ -290,6 +292,21 @@ export class MemStorage implements IStorage {
     } else {
       this.educationParticipants.push(participant);
     }
+  }
+
+  async saveEducationParticipants(participants: EducationParticipant[]): Promise<void> {
+    this.educationParticipants = participants;
+  }
+
+  async batchSaveEducationParticipants(newParticipants: EducationParticipant[]): Promise<void> {
+    const participantMap = new Map(this.educationParticipants.map(p => [p.id, p]));
+    
+    // Update or add new participants
+    for (const participant of newParticipants) {
+      participantMap.set(participant.id, participant);
+    }
+    
+    this.educationParticipants = Array.from(participantMap.values());
   }
 
   async updateEducationParticipant(id: string, participant: Partial<EducationParticipant>): Promise<void> {

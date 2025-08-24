@@ -43,14 +43,14 @@ export default function Sidebar({ className }: SidebarProps) {
           title: "종사자 데이터",
           href: "/employee-data",
           icon: UserCheck,
-          description: "종사자 정보 관리",
+          description: "종사자 정보 관리 및 통계",
           isActive: location === "/employee-data"
         },
         {
           title: "기관 현황",
           href: "/institution-data",
           icon: Building,
-          description: "기관별 배치 현황",
+          description: "기관별 배치 현황 및 통계",
           isActive: location === "/institution-data"
         }
       ]
@@ -80,38 +80,8 @@ export default function Sidebar({ className }: SidebarProps) {
           title: "소속 회원 목록",
           href: "/participants",
           icon: Users,
-          description: "소속 회원 교육 이수 현황",
+          description: "소속 회원 교육 이수 현황 및 통계",
           isActive: location === "/participants"
-        }
-      ]
-    },
-    {
-      title: "통계 현황",
-      icon: BarChart3,
-      color: "text-purple-600",
-      bgColor: "bg-purple-50",
-      borderColor: "border-purple-200",
-      items: [
-        {
-          title: "종사자 통계",
-          href: "/employee-stats",
-          icon: BarChart3,
-          description: "종사자 현황 분석",
-          isActive: location === "/employee-stats"
-        },
-        {
-          title: "교육 통계", 
-          href: "/education-stats",
-          icon: PieChart,
-          description: "교육 이수 현황 분석",
-          isActive: location === "/education-stats"
-        },
-        {
-          title: "기관 통계",
-          href: "/institution-stats",
-          icon: Building,
-          description: "기관 운영 현황 분석",
-          isActive: location === "/institution-stats"
         }
       ]
     }

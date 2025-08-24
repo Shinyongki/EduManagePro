@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Filter, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Filter, AlertTriangle, ChevronDown, ChevronUp, BarChart3 } from 'lucide-react';
 import { Link } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
 import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
 import { 
@@ -37,7 +43,7 @@ import {
 } from "@/utils/unified-data-source";
 
 export default function ParticipantsPage() {
-  const [activeTab, setActiveTab] = useState('upload');
+  const [showUploadSection, setShowUploadSection] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -51,6 +57,7 @@ export default function ParticipantsPage() {
   const [selectedInconsistency, setSelectedInconsistency] = useState<any>(null);
   const [selectedInconsistencyType, setSelectedInconsistencyType] = useState<string>('all');
   const [showFullTable, setShowFullTable] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('statistics'); // 교육통계를 기본 탭으로
   const { toast } = useToast();
   
   // 불일치 유형별 권장조치 함수
@@ -292,7 +299,7 @@ export default function ParticipantsPage() {
     };
     
     loadDataAsync();
-  }, [activeTab]); // Load based on active tab
+  }, []); // Load data on component mount
 
   // 종사자 데이터 재로딩 체크 (데이터가 비어있는 경우)
   useEffect(() => {
@@ -751,6 +758,75 @@ export default function ParticipantsPage() {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="statistics" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                교육 수료 통계
+              </CardTitle>
+              <CardDescription>
+                소속 회원들의 교육 수료 현황을 통계로 확인합니다
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!participantData || participantData.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="text-muted-foreground">
+                    아직 업로드된 소속 회원 데이터가 없습니다.
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    className="mt-4"
+                    onClick={() => setActiveTab('upload')}
+                  >
+                    데이터 업로드하기
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {/* 통계 요약 - 소속회원 기준 정확한 통계 ('정상' 상태만) */}
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <Card className="p-4 text-center border-l-4 border-l-blue-400">
+                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.total}</div>
+                      <div className="text-xs text-muted-foreground">재직자 ('정상' 상태)</div>
+                      <div className="text-xs text-gray-500">전체: {participantStats.totalCount}명</div>
+                    </Card>
+                    <Card className="p-4 text-center border-l-4 border-l-green-500">
+                      <div className="text-2xl font-bold text-green-600">{participantStats.stats.complete}</div>
+                      <div className="text-xs text-muted-foreground">🟢 완전수료</div>
+                      <div className="text-xs text-green-600 font-medium">
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.complete / participantStats.stats.total) * 100) : 0}%
+                      </div>
+                    </Card>
+                    <Card className="p-4 text-center border-l-4 border-l-yellow-500">
+                      <div className="text-2xl font-bold text-yellow-600">{participantStats.stats.partial}</div>
+                      <div className="text-xs text-muted-foreground">🟡 부분수료</div>
+                      <div className="text-xs text-yellow-600 font-medium">
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.partial / participantStats.stats.total) * 100) : 0}%
+                      </div>
+                    </Card>
+                    <Card className="p-4 text-center border-l-4 border-l-blue-500">
+                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.inProgress}</div>
+                      <div className="text-xs text-muted-foreground">⚪ 진행중</div>
+                      <div className="text-xs text-blue-600 font-medium">
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.inProgress / participantStats.stats.total) * 100) : 0}%
+                      </div>
+                    </Card>
+                    <Card className="p-4 text-center border-l-4 border-l-red-500">
+                      <div className="text-2xl font-bold text-red-600">{participantStats.stats.none}</div>
+                      <div className="text-xs text-muted-foreground">🔴 미수료</div>
+                      <div className="text-xs text-red-600 font-medium">
+                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.none / participantStats.stats.total) * 100) : 0}%
+                      </div>
+                    </Card>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="upload" className="mt-6">
           <div className="space-y-6">
             <DateUploadForm
@@ -823,42 +899,6 @@ export default function ParticipantsPage() {
                 </div>
               ) : (
                 <>
-                  {/* 통계 요약 - 소속회원 기준 정확한 통계 ('정상' 상태만) */}
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                    <Card className="p-4 text-center border-l-4 border-l-blue-400">
-                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.total}</div>
-                      <div className="text-xs text-muted-foreground">재직자 ('정상' 상태)</div>
-                      <div className="text-xs text-gray-500">전체: {participantStats.totalCount}명</div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-green-500">
-                      <div className="text-2xl font-bold text-green-600">{participantStats.stats.complete}</div>
-                      <div className="text-xs text-muted-foreground">🟢 완전수료</div>
-                      <div className="text-xs text-green-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.complete / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-yellow-500">
-                      <div className="text-2xl font-bold text-yellow-600">{participantStats.stats.partial}</div>
-                      <div className="text-xs text-muted-foreground">🟡 부분수료</div>
-                      <div className="text-xs text-yellow-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.partial / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-blue-500">
-                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.inProgress}</div>
-                      <div className="text-xs text-muted-foreground">⚪ 진행중</div>
-                      <div className="text-xs text-blue-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.inProgress / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-red-500">
-                      <div className="text-2xl font-bold text-red-600">{participantStats.stats.none}</div>
-                      <div className="text-xs text-muted-foreground">🔴 미수료</div>
-                      <div className="text-xs text-red-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.none / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                  </div>
 
                   {/* 필터링 및 검색 */}
                   <div className="mb-4 space-y-4">

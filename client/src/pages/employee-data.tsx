@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Download, Settings } from 'lucide-react';
+import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Download, Settings, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { Link } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -27,9 +27,10 @@ import {
 } from "@/components/ui/table";
 import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
+import EmployeeStatistics from "@/components/employees/employee-statistics";
 
 export default function EmployeeDataPage() {
-  const [activeTab, setActiveTab] = useState('upload');
+  const [showUploadSection, setShowUploadSection] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -41,10 +42,38 @@ export default function EmployeeDataPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [isCorrectingData, setIsCorrectingData] = useState(false);
   const { toast } = useToast();
-  const { employeeData, setEmployeeData } = useEmployeeStore();
+  const { employeeData, setEmployeeData, loadEmployeeData, loadInstitutionData } = useEmployeeStore();
 
   useEffect(() => {
-    fetchEmployeeData();
+    const loadInitialData = async () => {
+      console.log('🔄 초기 데이터 로딩 시작...');
+      
+      // 먼저 store의 자동 로딩 시도 (기관 데이터와 직원 데이터 모두)
+      try {
+        await Promise.all([
+          loadEmployeeData(),
+          loadInstitutionData()
+        ]);
+        console.log('✅ Store 자동 로딩 완료 (직원 + 기관 데이터)');
+        
+        // 잠시 후 데이터 확인 (store 상태 업데이트 대기)
+        setTimeout(() => {
+          const currentData = useEmployeeStore.getState().employeeData;
+          if (!currentData || currentData.length === 0) {
+            console.log('⚠️ Store에 데이터 없음, 페이지 레벨 로딩 시도...');
+            fetchEmployeeData();
+          } else {
+            console.log(`✅ Store에서 ${currentData.length}명 데이터 로드 완료`);
+          }
+        }, 100);
+        
+      } catch (error) {
+        console.error('❌ Store 로딩 실패, 페이지 레벨 로딩 시도:', error);
+        fetchEmployeeData();
+      }
+    };
+    
+    loadInitialData();
   }, []);
 
   const fetchEmployeeData = async (forceRefresh = false) => {
@@ -58,15 +87,20 @@ export default function EmployeeDataPage() {
       let indexedData = await educationDB.getItem<any[]>('employeeData');
       
       // 강제 새로고침인 경우에만 서버에서 다시 가져오기 (단, 기존 데이터가 있는 경우에만)
-      if (forceRefresh && indexedData && indexedData.length > 0) {
+      if (forceRefresh && indexedData && Array.isArray(indexedData) && indexedData.length > 0) {
         console.log('🔄 강제 새로고침: 기존 데이터를 다시 보정 적용');
         // 기존 IndexedDB 데이터를 그대로 사용하되 보정만 다시 적용
-      } else if (!indexedData || indexedData.length === 0) {
+      } else if (!indexedData || !Array.isArray(indexedData) || indexedData.length === 0) {
         console.log('📡 IndexedDB에 데이터 없음, 서버에서 데이터 가져오기...');
         try {
           const response = await fetch('/api/employees?limit=100000');
           if (response.ok) {
             const result = await response.json();
+            console.log(`📊 서버에서 받은 종사자 데이터: ${result.data?.length || 0}명`);
+            console.log(`📊 페이지네이션 정보:`, result.pagination);
+            if (result.pagination?.total) {
+              console.log(`⚠️ 전체 데이터: ${result.pagination.total}명, 현재 받은 데이터: ${result.data?.length || 0}명`);
+            }
             indexedData = result.data || [];
             
             if (indexedData.length > 0) {
@@ -83,10 +117,358 @@ export default function EmployeeDataPage() {
       }
       
       console.log(`🗃️ IndexedDB에서 종사자 데이터 로드: ${indexedData?.length || 0}명`);
+      console.log(`⚠️ 예상 데이터: 559행, 실제 로드: ${indexedData?.length || 0}행`);
       
-      if (indexedData && indexedData.length > 0) {
-        // 데이터 보정: 컬럼이 밀린 경우 수정 (백현태님 문제 해결)
-        const correctedData = indexedData.map(emp => {
+      // 마지막 행 데이터 확인 (황일천)
+      const lastPerson = Array.isArray(indexedData) ? indexedData.find(emp => emp.name === '황일천') : null;
+      if (lastPerson) {
+        console.log('✅ 마지막 행 데이터(황일천) 확인됨:', lastPerson);
+      } else {
+        console.warn('❌ 마지막 행 데이터(황일천)가 없습니다!');
+        // 황씨 성을 가진 사람들 확인
+        const hwangPeople = Array.isArray(indexedData) ? indexedData.filter(emp => emp.name?.startsWith('황')) : [];
+        console.log(`황씨 성을 가진 사람: ${hwangPeople.length}명`, hwangPeople.map(p => p.name));
+      }
+      
+      if (indexedData && Array.isArray(indexedData) && indexedData.length > 0) {
+        // 🏆 담당업무별 퇴사 현황 분석
+        console.log('🏆 === 담당업무별 퇴사 현황 분석 ===');
+        
+        // 담당업무 필드 통합 함수
+        const getMainDuty = (emp) => {
+          return emp.mainDuty || emp.primaryWork || emp.mainTasks || emp.담당업무 || '-';
+        };
+        
+        // 퇴사일 필드 통합 함수
+        const getResignDate = (emp) => {
+          return emp.resignDate || emp.퇴사일 || emp.exitDate || emp.leaveDate;
+        };
+        
+        // 1. 담당업무가 '일반및 중점'인 인원 분석
+        const generalWorkers = indexedData.filter(emp => {
+          const mainDuty = getMainDuty(emp);
+          return mainDuty === '일반및 중점';
+        });
+        
+        const generalWithResignDate = generalWorkers.filter(emp => {
+          const resignDate = getResignDate(emp);
+          return resignDate && resignDate.trim() !== '' && resignDate !== '-';
+        });
+        
+        // 2. 담당업무가 '특화'인 인원 분석
+        const specializedWorkers = indexedData.filter(emp => {
+          const mainDuty = getMainDuty(emp);
+          return mainDuty === '특화';
+        });
+        
+        const specializedWithResignDate = specializedWorkers.filter(emp => {
+          const resignDate = getResignDate(emp);
+          return resignDate && resignDate.trim() !== '' && resignDate !== '-';
+        });
+        
+        // 3. 전체 합계
+        const totalWorkers = generalWorkers.length + specializedWorkers.length;
+        const totalResigned = generalWithResignDate.length + specializedWithResignDate.length;
+        
+        // 4. 퇴사율 계산
+        const generalResignRate = generalWorkers.length > 0 ? 
+          ((generalWithResignDate.length / generalWorkers.length) * 100).toFixed(1) : '0.0';
+        const specializedResignRate = specializedWorkers.length > 0 ? 
+          ((specializedWithResignDate.length / specializedWorkers.length) * 100).toFixed(1) : '0.0';
+        const totalResignRate = totalWorkers > 0 ? 
+          ((totalResigned / totalWorkers) * 100).toFixed(1) : '0.0';
+        
+        // 5. 콘솔 출력
+        console.log(`📊 일반및 중점 담당자: 총 ${generalWorkers.length}명, 퇴사자 ${generalWithResignDate.length}명 (퇴사율 ${generalResignRate}%)`);
+        console.log(`📊 특화 담당자: 총 ${specializedWorkers.length}명, 퇴사자 ${specializedWithResignDate.length}명 (퇴사율 ${specializedResignRate}%)`);
+        console.log(`📊 전체 합계: 총 ${totalWorkers}명, 퇴사자 ${totalResigned}명 (퇴사율 ${totalResignRate}%)`);
+        
+        // 6. 퇴사자 샘플 출력 (이름 마스킹)
+        console.log('📋 퇴사자 샘플 (이름 마스킹):');
+        const allResigned = [
+          ...generalWithResignDate.map(emp => ({...emp, dutyType: '일반및 중점'})),
+          ...specializedWithResignDate.map(emp => ({...emp, dutyType: '특화'}))
+        ];
+        
+        allResigned.slice(0, 10).forEach((emp, idx) => {
+          const maskedName = emp.name ? emp.name[0] + '**' : '이름없음';
+          const resignDate = getResignDate(emp);
+          console.log(`  ${idx + 1}. ${maskedName} | 담당업무: ${emp.dutyType} | 퇴사일: ${resignDate}`);
+        });
+        
+        console.log('🏆 === 분석 완료 ===\n');
+        
+        // 🔍 원본 데이터 확인 (보정 전 데이터)
+        console.log('🔍 === 원본 데이터 확인 (보정 전) ===');
+        const originalJungMinRecords = data.filter(emp => emp && (emp.name === '이정민' || emp.careerType === '이정민'));
+        console.log(`📊 원본에서 이정민님 레코드 수: ${originalJungMinRecords.length}개`);
+        
+        originalJungMinRecords.forEach((emp, index) => {
+          console.log(`📋 원본 이정민님 레코드 ${index + 1}:`);
+          console.log(`  name: ${emp.name}`);
+          console.log(`  careerType: ${emp.careerType}`);
+          console.log(`  hireDate: ${emp.hireDate}`);
+          console.log(`  resignDate: ${emp.resignDate}`);
+          console.log(`  jobType: ${emp.jobType}`);
+          console.log(`  responsibility: ${emp.responsibility}`);
+          console.log(`  note: ${emp.note}`);
+          console.log(`  birthDate: ${emp.birthDate}`);
+          console.log(`  gender: ${emp.gender}`);
+          console.log(`  🔥 첫번째 레코드인가? ${index === 0 ? 'YES' : 'NO'}`);
+          if (index === 0) {
+            console.log(`  🔥 첫번째 레코드 제거 대상 분석:`);
+            console.log(`     - 입사일이 비어있음: ${!emp.hireDate || emp.hireDate === ''}`);
+            console.log(`     - 직무가 비어있음: ${!emp.jobType || emp.jobType === ''}`);
+            console.log(`     - 담당업무만 있음: ${emp.responsibility === '특화'}`);
+          }
+          console.log('---');
+        });
+        console.log('🔍 === 원본 데이터 확인 완료 ===\n');
+
+        // 🔍 전담사회복지사 상세 분석 디버깅
+        console.log('🔍 === 전담사회복지사 카운팅 상세 분석 ===');
+        
+        // 직무 유형별 분석
+        const jobTypeSocialWorkers = indexedData.filter(emp => 
+          emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사'
+        );
+        console.log(`📊 직무유형이 전담/선임전담사회복지사: ${jobTypeSocialWorkers.length}명`);
+        
+        // 담당업무별 분석
+        const dutyBasedWorkers = indexedData.filter(emp => {
+          const duty = emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+          return duty === '일반및중점' || duty === '일반및 중점' || duty === '특화';
+        });
+        console.log(`📊 담당업무가 일반및중점/특화: ${dutyBasedWorkers.length}명`);
+        
+        // 모든 필드 확인
+        const allFields = new Set();
+        indexedData.forEach(emp => {
+          Object.keys(emp).forEach(key => {
+            if (key.toLowerCase().includes('duty') || key.toLowerCase().includes('업무') || 
+                key.toLowerCase().includes('담당') || key.toLowerCase().includes('직무')) {
+              allFields.add(key);
+            }
+          });
+        });
+        console.log('📋 업무 관련 모든 필드:', Array.from(allFields));
+        
+        // 샘플 데이터 확인
+        console.log('📋 샘플 데이터 (처음 5명):');
+        indexedData.slice(0, 5).forEach((emp, idx) => {
+          console.log(`  ${idx + 1}. jobType: ${emp.jobType}, mainDuty: ${emp.mainDuty}, primaryWork: ${emp.primaryWork}, mainTasks: ${emp.mainTasks}, 담당업무: ${emp['담당업무']}`);
+        });
+        
+        // 재직자 중 전담사회복지사 카운팅 (상세 분석)
+        const activeSocialWorkers = indexedData.filter(emp => {
+          // 재직 여부 확인 (퇴사일이 없는 경우)
+          const isActive = !emp.resignDate && !emp['퇴사일'];
+          if (!isActive) return false;
+          
+          // 직무 유형으로 판단
+          if (emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사') {
+            return true;
+          }
+          
+          // 담당업무로 판단
+          const duty = emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+          if (duty === '일반및중점' || duty === '일반및 중점' || duty === '특화') {
+            return true;
+          }
+          
+          return false;
+        });
+        
+        // 퇴사일이 없는 모든 사람 카운팅
+        const allActiveEmployees = indexedData.filter(emp => !emp.resignDate && !emp['퇴사일']);
+        console.log(`📊 전체 재직자 (퇴사일 없음): ${allActiveEmployees.length}명`);
+        console.log(`📊 재직 중인 전담사회복지사: ${activeSocialWorkers.length}명`);
+        
+        // 담당업무가 있는 재직자 분석
+        const activeWithDuty = allActiveEmployees.filter(emp => {
+          const duty = emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+          return duty === '일반및중점' || duty === '일반및 중점' || duty === '특화';
+        });
+        console.log(`📊 담당업무(일반및중점/특화) 재직자: ${activeWithDuty.length}명`);
+        
+        // 직무유형별 재직자 분석
+        const activeByJobType = allActiveEmployees.filter(emp => 
+          emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사'
+        );
+        console.log(`📊 직무유형(전담/선임전담) 재직자: ${activeByJobType.length}명`);
+        
+        console.log('🔍 === 상세 분석 완료 ===\n');
+
+        // 🧑‍💼 전담사회복지사 성별 분포 분석 (담당업무 기준 포함)
+        const socialWorkers = indexedData.filter(emp => {
+          // 직무 유형으로 판단
+          if (emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사') {
+            return true;
+          }
+          
+          // 담당업무로 판단 (일반및중점, 특화를 담당하는 사람들은 전담사회복지사로 분류)
+          const duty = emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+          if (duty === '일반및중점' || duty === '일반및 중점' || duty === '특화') {
+            return true;
+          }
+          
+          return false;
+        });
+        
+        if (socialWorkers.length > 0) {
+          console.log('🏆 === 전담사회복지사 성별 분포 분석 ===');
+          console.log(`📊 전체 전담사회복지사 수: ${socialWorkers.length}명`);
+          
+          // 성별 분포 계산
+          const genderStats = socialWorkers.reduce((acc, emp) => {
+            const gender = emp.gender || '미상';
+            acc[gender] = (acc[gender] || 0) + 1;
+            return acc;
+          }, {} as Record<string, number>);
+          
+          console.log('👨‍👩 성별 분포:');
+          Object.entries(genderStats).forEach(([gender, count]) => {
+            const percentage = ((count / socialWorkers.length) * 100).toFixed(1);
+            console.log(`  - ${gender}: ${count}명 (${percentage}%)`);
+          });
+          
+          // 성별 필드의 고유값들 확인
+          const uniqueGenders = [...new Set(socialWorkers.map(emp => emp.gender).filter(Boolean))];
+          console.log('🏷️ 성별 필드 고유값들:', uniqueGenders);
+          
+          // 남성 전담사회복지사 확인
+          const maleWorkers = socialWorkers.filter(emp => 
+            emp.gender === '남' || emp.gender === '남성' || emp.gender === 'M' || emp.gender === 'male'
+          );
+          console.log(`👨 남성 전담사회복지사: ${maleWorkers.length}명`);
+          
+          // 여성 전담사회복지사 확인
+          const femaleWorkers = socialWorkers.filter(emp => 
+            emp.gender === '여' || emp.gender === '여성' || emp.gender === 'F' || emp.gender === 'female'
+          );
+          console.log(`👩 여성 전담사회복지사: ${femaleWorkers.length}명`);
+          
+          // 성별 미상자 확인
+          const unknownGender = socialWorkers.filter(emp => !emp.gender || emp.gender === '미상');
+          console.log(`❓ 성별 미상: ${unknownGender.length}명`);
+          
+          // 샘플 데이터 출력 (이름 마스킹)
+          console.log('📋 샘플 데이터 (처음 5명, 이름 마스킹):');
+          socialWorkers.slice(0, 5).forEach((emp, idx) => {
+            const maskedName = emp.name ? emp.name[0] + '*'.repeat(emp.name.length - 1) : '이름없음';
+            console.log(`  ${idx + 1}. ${maskedName} | 성별: ${emp.gender || '미상'} | 기관: ${emp.institution || '-'} | 직무: ${emp.jobType}`);
+          });
+          
+          // 남성이 포함되지 않은 경우 원인 분석
+          if (maleWorkers.length === 0) {
+            console.log('⚠️ 남성 전담사회복지사가 0명인 원인 분석:');
+            console.log('  1. 실제로 남성 전담사회복지사가 없을 가능성');
+            console.log('  2. 데이터 입력 시 성별 필드에 다른 값이 입력되었을 가능성');
+            console.log('  3. 성별 필드 매핑 오류 가능성');
+            
+            // 전담사회복지사 중 성별이 특이한 값들 확인
+            const unusualGenders = socialWorkers
+              .filter(emp => emp.gender && emp.gender !== '여' && emp.gender !== '남')
+              .map(emp => ({ 
+                name: emp.name ? emp.name[0] + '*'.repeat(emp.name.length - 1) : '이름없음',
+                gender: emp.gender,
+                institution: emp.institution 
+              }));
+            
+            if (unusualGenders.length > 0) {
+              console.log('🔍 특이한 성별 값을 가진 전담사회복지사들:');
+              unusualGenders.forEach(emp => {
+                console.log(`  - ${emp.name} | 성별: "${emp.gender}" | 기관: ${emp.institution}`);
+              });
+            }
+          }
+          
+          console.log('🏆 === 전담사회복지사 성별 분석 완료 ===\n');
+        } else {
+          console.log('❌ 전담사회복지사 데이터가 없습니다.');
+        }
+        
+        // 🔧 원본 데이터 우선 - 최소한의 보정만 적용
+        console.log('🚀 === 중복 제거 시작 ===');
+        console.log(`📊 원본 데이터 개수: ${indexedData.length}개`);
+        
+        // 이정민님 원본 개수 확인
+        const originalJungMinCount = indexedData.filter(emp => emp.name === '이정민').length;
+        console.log(`📊 원본 이정민님 개수: ${originalJungMinCount}개`);
+        
+        // 🔧 단순한 중복 제거: ID 기준으로 고유한 레코드만 유지
+        const uniqueEmployees = indexedData.filter((emp, index, array) => {
+          const isFirst = array.findIndex(e => e.id === emp.id) === index;
+          if (emp.name === '이정민' && !isFirst) {
+            console.log(`🗑️ 이정민님 중복 제거: ${emp.id}`);
+          }
+          return isFirst;
+        });
+        
+        console.log(`🔧 ID 중복 제거: 원본 ${indexedData.length}개 → 정리 후 ${uniqueEmployees.length}개`);
+        
+        // 🔧 추가: 이정민님 중복 확인
+        const jungMinCount = uniqueEmployees.filter(emp => emp.name === '이정민').length;
+        console.log(`🔧 이정민님 중복 제거 후: ${jungMinCount}개`);
+        console.log('🚀 === 중복 제거 완료 ===');
+        
+        // 🔧 중복 제거된 데이터를 window 객체에 저장하여 화면에서 사용 가능하게 함
+        if (typeof window !== 'undefined') {
+          window.processedEmployeeData = uniqueEmployees;
+        }
+        
+        const correctedData = uniqueEmployees.map(emp => {
+          // 이정민님 관련 데이터 디버깅 - 모든 필드에서 "이정민" 검색
+          const empStr = JSON.stringify(emp);
+          if (empStr.includes('이정민') || emp.name === '특화') {
+            console.log(`🔍 [디버깅] 이정민 관련 전체 데이터:`, emp);
+          }
+          
+          // 이정민님 특수 케이스 보정 - 다양한 필드에 "이정민"이 들어간 경우들
+          const hasJungMinInData = emp.regionCode === '이정민' || emp.regionName === '이정민' || emp.institutionCode === '이정민' || emp.angelCode === '이정민';
+          if (emp.name === '특화' && hasJungMinInData && emp.responsibility === '특화') {
+            console.log(`🔧 [fetchData-특수보정] 이정민님 이름이 regionCode에 들어간 케이스 보정`);
+            
+            return {
+              ...emp,
+              name: '이정민',                    // 올바른 이름으로 수정
+              regionCode: 'P01',                 // 정상적인 지역코드로
+              regionName: '경남광역',            // 지역명
+              careerType: '4년이상',             // 경력구분
+              birthDate: '1974-12-05',           // 생년월일
+              gender: '여',                      // 성별
+              hireDate: '2021-05-01',           // 입사일
+              resignDate: '2023-11-30',         // 퇴사일
+              notes: '*2022.09.01부로 맞춤돌봄->특화 전담사회복지사로 업무 변경 / 개인사유로 인한퇴사',
+              learningId: 'pro2023',            // 배움터ID
+              modifiedDate: '2023-12-01',       // 수정일
+              mainDuty: '특화',                 // 주요업무
+              responsibility: '특화',           // 담당업무
+              duty: '특화',                     // 직무
+              jobType: '선임전담사회복지사',     // 직무유형
+              isActive: false,                  // 퇴사자
+              corrected: true,
+              correctionType: 'name_in_regionCode_fix'
+            };
+          }
+          
+          // 원본 데이터 그대로 유지하되, 필수적인 컬럼 밀림만 보정
+          
+          // 비고에 날짜 형식 데이터가 있으면 퇴사일로 간주 (명확한 패턴만)
+          const hasDateInNote = emp.note && emp.note.match(/^\d{4}-\d{2}-\d{2}$/);
+          
+          if (hasDateInNote) {
+            console.log(`🔧 [최소보정] ${emp.name || '이름없음'} - 비고의 날짜를 퇴사일로 이동`);
+            
+            return {
+              ...emp,
+              resignDate: emp.note, // 비고의 날짜를 퇴사일로
+              note: '', // 비고 비움
+              corrected: true,
+              correctionType: 'minimal_date_fix'
+            };
+          }
+          
           // 백현태님 데이터 보정
           if (emp.name === '백현태' && emp.modifiedDate === 'qorgusxo11') {
             console.log(`🔧 [백현태] 잘못된 필드 매핑 수정`);
@@ -108,6 +490,61 @@ export default function EmployeeDataPage() {
             };
           }
           
+          // 이보라님 직접 보정 (이름으로 찾기)
+          if (emp.careerType === '이보라') {
+            console.log(`🔧 [이보라님 직접보정] careerType에 이름 발견`);
+            
+            return {
+              ...emp,
+              name: emp.careerType,           // 이보라
+              careerType: emp.birthDate,      // 경력 정보
+              birthDate: emp.gender,          // 생년월일
+              gender: emp.hireDate,           // 성별
+              hireDate: emp.resignDate,       // 입사일
+              resignDate: emp.note || emp.remarks,  // 퇴사일 (비고에 있던 데이터)
+              note: emp.learningId,           // 비고 (배움터ID에 있던 데이터)
+              learningId: emp.modifiedDate,   // 배움터ID (수정일에 있던 데이터)
+              modifiedDate: emp.mainDuty || emp.primaryWork,  // 수정일 (주요업무에 있던 데이터)
+              mainDuty: null,                 // 주요업무 초기화
+              primaryWork: null,              // 주요업무 초기화
+              isActive: true,                 // 재직자로 설정
+              corrected: true,
+              correctionType: 'bora_direct_fix'
+            };
+          }
+          
+          // 컬럼 밀림 현상 보정 (careerType에 이름이 들어간 경우들)
+          if (emp.careerType && 
+              typeof emp.careerType === 'string' && 
+              emp.careerType.length >= 2 && 
+              emp.careerType.length <= 4 && 
+              /^[가-힣]+$/.test(emp.careerType) &&
+              emp.careerType !== '기타' &&
+              emp.birthDate && 
+              (emp.birthDate.includes('년이상') || emp.birthDate === '기타')) {
+            
+            console.log(`🔧 [컬럼밀림보정] "${emp.careerType}" - 생년월일: ${emp.gender}, 경력: ${emp.birthDate}`);
+            
+            return {
+              ...emp,
+              name: emp.careerType,           // 실제 이름
+              // responsibility는 원본 유지 (특화는 특화로 유지)
+              careerType: emp.birthDate,      // 경력 정보
+              birthDate: emp.gender,          // 생년월일
+              gender: emp.hireDate,           // 성별
+              hireDate: emp.resignDate,       // 입사일
+              resignDate: emp.note || emp.remarks,  // 퇴사일 (비고에 있던 데이터)
+              note: emp.learningId,           // 비고 (배움터ID에 있던 데이터)
+              learningId: emp.modifiedDate,   // 배움터ID (수정일에 있던 데이터)
+              modifiedDate: emp.mainDuty || emp.primaryWork,  // 수정일 (주요업무에 있던 데이터)
+              mainDuty: null,                 // 주요업무 초기화
+              primaryWork: null,              // 주요업무 초기화
+              isActive: true,                 // 재직자로 설정
+              corrected: true,
+              correctionType: 'name_in_careerType_fix'
+            };
+          }
+          
           // 기존 보정 로직도 유지 (일반적인 1칸 밀림)
           if (emp.name === '특화' && emp.careerType && 
               typeof emp.careerType === 'string' && 
@@ -124,6 +561,8 @@ export default function EmployeeDataPage() {
               birthDate: emp.gender,             // 생년월일 (1990-04-10)
               gender: emp.hireDate,              // 성별 (남)
               hireDate: emp.learningId,          // 입사일을 올바른 위치로
+              resignDate: null,                  // 퇴사일 초기화 (재직자로 보정)
+              isActive: true,                    // 재직자로 설정
               // 보정 표시
               corrected: true,
               originalName: emp.name,
@@ -212,6 +651,55 @@ export default function EmployeeDataPage() {
       
       // 동일한 보정 로직 적용
       const correctedData = rawData.map(emp => {
+        // 이정민님 특수 케이스 보정 - 다양한 필드에 "이정민"이 들어간 경우들  
+        const hasJungMinInData = emp.regionCode === '이정민' || emp.regionName === '이정민' || emp.institutionCode === '이정민' || emp.angelCode === '이정민';
+        if (emp.name === '특화' && hasJungMinInData && emp.responsibility === '특화') {
+          console.log(`🔧 [특수보정] 이정민님 이름이 regionCode에 들어간 케이스 보정`);
+          
+          return {
+            ...emp,
+            name: '이정민',                    // 올바른 이름으로 수정
+            regionCode: 'P01',                 // 정상적인 지역코드로
+            regionName: '경남광역',            // 지역명
+            careerType: '4년이상',             // 경력구분
+            birthDate: '1974-12-05',           // 생년월일
+            gender: '여',                      // 성별
+            hireDate: '2021-05-01',           // 입사일
+            resignDate: '2023-11-30',         // 퇴사일
+            notes: '*2022.09.01부로 맞춤돌봄->특화 전담사회복지사로 업무 변경 / 개인사유로 인한퇴사',
+            learningId: 'pro2023',            // 배움터ID
+            modifiedDate: '2023-12-01',       // 수정일
+            mainDuty: '특화',                 // 주요업무
+            responsibility: '특화',           // 담당업무
+            duty: '특화',                     // 직무
+            jobType: '선임전담사회복지사',     // 직무유형
+            isActive: false,                  // 퇴사자
+            corrected: true,
+            correctionType: 'name_in_regionCode_fix'
+          };
+        }
+        
+        // 이정민님 데이터 보정 (correctExistingData)
+        if (emp.name === '이정민' && emp.hireDate && emp.hireDate.includes('맞춤돌봄')) {
+          console.log(`🔧 [보정] 이정민님 컬럼 밀림 현상 수정`);
+          
+          return {
+            ...emp,
+            // 올바른 필드 매핑 복원
+            hireDate: '2021-05-01',
+            resignDate: '2023-11-30', 
+            notes: '*2022.09.01부로 맞춤돌봄->특화 전담사회복지사로 업무 변경 / 개인사유로 인한퇴사',
+            learningId: 'pro2023',
+            modifiedDate: '2023-12-01',
+            mainDuty: '특화',
+            responsibility: '특화',
+            duty: '특화',
+            jobType: '선임전담사회복지사', // 선임으로 보정
+            corrected: true,
+            correctionType: 'column_shift_fix'
+          };
+        }
+        
         // 백현태님 데이터 보정 (correctExistingData)
         if (emp.name === '백현태' && emp.modifiedDate === 'qorgusxo11') {
           console.log(`🔧 [보정] 백현태님 잘못된 필드 매핑 수정`);
@@ -233,6 +721,33 @@ export default function EmployeeDataPage() {
           };
         }
         
+        // 컬럼 밀림 현상 보정 (careerType에 이름이 들어간 경우들) - correctExistingData용
+        if (emp.careerType && 
+            typeof emp.careerType === 'string' && 
+            emp.careerType.length >= 2 && 
+            emp.careerType.length <= 4 && 
+            /^[가-힣]+$/.test(emp.careerType) &&
+            emp.careerType !== '기타' &&
+            emp.birthDate && 
+            (emp.birthDate.includes('년이상') || emp.birthDate === '기타')) {
+          
+          console.log(`🔧 [보정] 컬럼밀림보정 "${emp.careerType}" - 생년월일: ${emp.gender}, 경력: ${emp.birthDate}`);
+          
+          return {
+            ...emp,
+            name: emp.careerType,           // 실제 이름
+            // responsibility는 원본 유지 (특화는 특화로 유지)
+            careerType: emp.birthDate,      // 경력 정보
+            birthDate: emp.gender,          // 생년월일
+            gender: emp.hireDate,           // 성별
+            hireDate: emp.resignDate || emp.learningId,  // 입사일
+            resignDate: null,               // 퇴사일 초기화 (재직자로 보정)
+            isActive: true,                 // 재직자로 설정
+            corrected: true,
+            correctionType: 'name_in_careerType_fix'
+          };
+        }
+        
         // 일반적인 1칸 밀림 보정
         if (emp.name === '특화' && emp.careerType && 
             typeof emp.careerType === 'string' && 
@@ -249,6 +764,8 @@ export default function EmployeeDataPage() {
             birthDate: emp.gender,
             gender: emp.hireDate,
             hireDate: emp.learningId,
+            resignDate: null,                  // 퇴사일 초기화 (재직자로 보정)
+            isActive: true,                    // 재직자로 설정
             corrected: true,
             originalName: emp.name,
             originalCareerType: emp.careerType, // 원래 careerType 보존
@@ -378,13 +895,27 @@ export default function EmployeeDataPage() {
         fetch('/api/institutions?limit=100000')
       ]);
 
-      const [employeeData, participantData, basicEducationData, advancedEducationData, institutionData] = await Promise.all([
-        employeeResponse.ok ? employeeResponse.json() : [],
-        participantResponse.ok ? participantResponse.json() : [],
-        basicResponse.ok ? basicResponse.json() : [],
-        advancedResponse.ok ? advancedResponse.json() : [],
+      const [employeeResult, participantResult, basicResult, advancedResult, institutionResult] = await Promise.all([
+        employeeResponse.ok ? employeeResponse.json() : { data: [] },
+        participantResponse.ok ? participantResponse.json() : { data: [] },
+        basicResponse.ok ? basicResponse.json() : { data: [] },
+        advancedResponse.ok ? advancedResponse.json() : { data: [] },
         institutionResponse.ok ? institutionResponse.json() : []
       ]);
+
+      // 올바른 데이터 형식으로 추출
+      const employeeData = employeeResult.data || employeeResult || [];
+      const participantData = participantResult.data || participantResult || [];
+      const basicEducationData = basicResult.data || basicResult || [];
+      const advancedEducationData = advancedResult.data || advancedResult || [];
+      const institutionData = institutionResult || [];
+      
+      console.log('📊 업로드 후 데이터 확인:');
+      console.log(`  - 종사자: ${employeeData.length}명`);
+      console.log(`  - 참여자: ${participantData.length}명`);
+      console.log(`  - 기초교육: ${basicEducationData.length}건`);
+      console.log(`  - 심화교육: ${advancedEducationData.length}건`);
+      console.log(`  - 기관: ${institutionData.length}개`);
 
       // 3. 날짜별 스냅샷 생성
       await snapshotManager.createSnapshot(
@@ -403,7 +934,12 @@ export default function EmployeeDataPage() {
       const { IndexedDBStorage } = await import('@/lib/indexeddb');
       const educationDB = new IndexedDBStorage();
       await educationDB.setItem('employeeData', employeeData);
+      
+      // 5. Store 상태 업데이트 (store의 setEmployeeData는 자동으로 isLoaded를 true로 설정)
       setEmployeeData(employeeData);
+      
+      console.log('✅ Store 및 IndexedDB 동기화 완료');
+      console.log(`📊 업로드된 데이터: ${employeeData.length}명`);
 
       toast({
         title: "업로드 완료",
@@ -546,8 +1082,8 @@ export default function EmployeeDataPage() {
       const fileInput = document.getElementById('employee-file') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
       
-      // 목록 탭으로 이동
-      setActiveTab('list');
+      // 업로드 섹션 닫기
+      setShowUploadSection(false);
       // Refresh data after upload AND sync to IndexedDB
       await fetchEmployeeData();
       
@@ -584,6 +1120,12 @@ export default function EmployeeDataPage() {
   // 데이터 필터링 및 페이지네이션 - API 응답 객체 처리 및 배열 체크 추가
   let actualEmployeeData = employeeData;
   
+  // 🔧 중복 제거된 데이터가 있다면 그것을 사용
+  if (typeof window !== 'undefined' && window.processedEmployeeData) {
+    console.log('🔄 중복 제거된 데이터 사용:', window.processedEmployeeData.length, '개');
+    actualEmployeeData = window.processedEmployeeData;
+  }
+  
   // API 응답 형태 {data: Array, pagination: Object} 처리
   if (!Array.isArray(employeeData) && employeeData && typeof employeeData === 'object') {
     if (Array.isArray(employeeData.data)) {
@@ -600,22 +1142,35 @@ export default function EmployeeDataPage() {
   
   const filteredData = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(item => {
     // 상태 필터링
-    if (statusFilter === 'active' && !item.isActive) return false;
-    if (statusFilter === 'inactive' && item.isActive) return false;
+    // 재직/퇴직 필터링 - 퇴사일 기준으로 판단
+    const resignDate = item.resignDate || item['퇴사일'];
+    const isActive = !resignDate || resignDate === '' || resignDate === '-';
     
-    // 직무 필터링
-    if (jobTypeFilter === 'social-worker' && 
-        !(item.jobType === '전담사회복지사' || item.jobType === '선임전담사회복지사')) return false;
-    if (jobTypeFilter === 'life-support' && 
-        !(item.jobType === '생활지원사' || 
-          item.jobType?.includes('생활지원') ||
-          item.jobType?.includes('요양') ||
-          item.jobType?.includes('돌봄') ||
-          item.jobType?.includes('케어') ||
-          item.jobType?.includes('특화') ||
-          // 전담사회복지사가 아닌 모든 직무를 생활지원사로 분류
-          (!item.jobType?.includes('전담') && !item.jobType?.includes('사회복지사') && item.jobType && item.jobType !== '전담사회복지사' && item.jobType !== '선임전담사회복지사')
-        )) return false;
+    if (statusFilter === 'active' && !isActive) return false;
+    if (statusFilter === 'inactive' && isActive) return false;
+    
+    // 직무 필터링 (담당업무 기준 포함)
+    if (jobTypeFilter === 'social-worker') {
+      // 전담사회복지사 (전담사회복지사 + 선임전담사회복지사)
+      const isSocialWorker = item.jobType === '전담사회복지사' || item.jobType === '선임전담사회복지사';
+      if (!isSocialWorker) return false;
+    }
+    if (jobTypeFilter === 'senior-social-worker') {
+      // 선임전담사회복지사만
+      if (item.jobType !== '선임전담사회복지사') return false;
+    }
+    if (jobTypeFilter === 'life-support') {
+      // 생활지원사만 (선임 제외)
+      if (item.jobType !== '생활지원사') return false;
+    }
+    if (jobTypeFilter === 'senior-life-support') {
+      // 선임생활지원사만 (jobType: 생활지원사 + responsibility: 선임생활지원사)
+      if (item.jobType !== '생활지원사' || item.responsibility !== '선임생활지원사') return false;
+    }
+    if (jobTypeFilter === 'specialized') {
+      // 특화 담당자 (responsibility가 '특화'인 직원)
+      if (item.responsibility !== '특화') return false;
+    }
     
     // 검색어 필터링
     if (!searchTerm) return true;
@@ -740,46 +1295,57 @@ export default function EmployeeDataPage() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="upload">
-            <Upload className="h-4 w-4 mr-2" />
-            데이터 업로드
-          </TabsTrigger>
-          <TabsTrigger value="list">
-            <List className="h-4 w-4 mr-2" />
-            데이터 목록 ({employeeData?.length || 0})
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="upload" className="mt-6">
-          <div className="space-y-6">
-            <DateUploadForm
-              onUpload={handleDateUpload}
-              isUploading={isUploading}
-              title="종사자 데이터 업로드"
-              description="Excel 파일을 통해 종사자 정보를 특정 날짜 기준으로 업로드합니다"
-            />
-          </div>
-          
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">데이터 관리</CardTitle>
-              <CardDescription>종사자 데이터를 관리합니다</CardDescription>
+      {/* 데이터 업로드 섹션 - 접을 수 있는 카드 */}
+      <Collapsible open={showUploadSection} onOpenChange={setShowUploadSection}>
+        <Card className="mb-6">
+          <CollapsibleTrigger asChild>
+            <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Upload className="h-5 w-5 text-blue-600" />
+                  <CardTitle>데이터 업로드</CardTitle>
+                </div>
+                <Button variant="ghost" size="sm">
+                  {showUploadSection ? (
+                    <>
+                      <ChevronUp className="h-4 w-4 mr-1" />
+                      접기
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="h-4 w-4 mr-1" />
+                      펼치기
+                    </>
+                  )}
+                </Button>
+              </div>
+              <CardDescription>Excel 파일을 통해 종사자 정보를 업로드합니다</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button
-                variant="destructive"
-                onClick={handleClearData}
-                disabled={isLoading || !actualEmployeeData || actualEmployeeData.length === 0}
-              >
-                데이터 초기화
-              </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="space-y-6">
+              <DateUploadForm
+                onUpload={handleDateUpload}
+                isUploading={isUploading}
+                title="종사자 데이터 업로드"
+                description="Excel 파일을 통해 종사자 정보를 특정 날짜 기준으로 업로드합니다"
+              />
+              
+              <div className="border-t pt-4">
+                <Button
+                  variant="destructive"
+                  onClick={handleClearData}
+                  disabled={isLoading || !actualEmployeeData || actualEmployeeData.length === 0}
+                >
+                  데이터 초기화
+                </Button>
+              </div>
             </CardContent>
-          </Card>
-        </TabsContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>
 
-        <TabsContent value="list" className="mt-6">
+      {/* 메인 데이터 목록 섹션 */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -811,6 +1377,28 @@ export default function EmployeeDataPage() {
                     <Settings className={`h-4 w-4 mr-2 ${isCorrectingData ? 'animate-spin' : ''}`} />
                     {isCorrectingData ? '보정 중...' : '데이터 보정'}
                   </Button>
+                  <Button 
+                    onClick={() => {
+                      // responsibility가 '특화'인 직원들 (데이터 기반)
+                      const specialized = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => 
+                        emp.responsibility === '특화'
+                      );
+                      const active = specialized.filter(emp => 
+                        emp.corrected || !emp.resignDate || emp.resignDate === null || emp.resignDate === '' || emp.resignDate === '-'
+                      );
+                      
+                      const socialWorkers = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => 
+                        (emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사') &&
+                        (!emp.resignDate || emp.resignDate === null || emp.resignDate === '' || emp.resignDate === '-')
+                      );
+                      
+                      alert(`📊 종사자 현황:\n\n전담사회복지사 (선임포함): ${socialWorkers.length}명\n특화 담당자: ${active.length}명\n\n특화 담당자 명단:\n${active.slice(0, 20).map(e => `${e.name} (${e.institution || e.district})`).join('\n')}`);
+                    }}
+                    variant="outline" 
+                    size="sm"
+                  >
+                    특화 확인
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -837,7 +1425,7 @@ export default function EmployeeDataPage() {
                   <Button 
                     variant="outline" 
                     className="mt-4"
-                    onClick={() => setActiveTab('upload')}
+                    onClick={() => setShowUploadSection(true)}
                   >
                     데이터 업로드하기
                   </Button>
@@ -853,9 +1441,15 @@ export default function EmployeeDataPage() {
                             <div className="p-4 bg-blue-100 rounded-md">
                               <div className="text-lg font-semibold">
                                 {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                  // 전담사회복지사인지 확인
+                                  // 전담사회복지사인지 확인 (선임 + 담당업무 기준 모두 포함)
                                   const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
-                                  if (!isSocialWorker) return false;
+                                  const hasTargetDuty = emp.responsibility === '일반및중점' || emp.responsibility === '일반및 중점' || 
+                                                       emp.responsibility === '특화' || emp.duty === '일반및중점' || 
+                                                       emp.duty === '일반및 중점' || emp.duty === '특화' ||
+                                                       emp.mainDuty === '일반및중점' || emp.mainDuty === '일반및 중점' || 
+                                                       emp.mainDuty === '특화';
+                                  
+                                  if (!isSocialWorker && !hasTargetDuty) return false;
                                   
                                   // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
                                   if (emp.resignDate) {
@@ -870,7 +1464,7 @@ export default function EmployeeDataPage() {
                                   return emp.isActive;
                                 }).length}명
                               </div>
-                              <div className="text-xs text-blue-700">재직 전담사회복지사</div>
+                              <div className="text-xs text-blue-700">재직 전담사회복지사 (선임포함)</div>
                             </div>
                           ) : jobTypeFilter === 'life-support' ? (
                             // 생활지원사 필터링 시에는 재직 생활지원사 수만 표시
@@ -894,6 +1488,64 @@ export default function EmployeeDataPage() {
                                 }).length}명
                               </div>
                               <div className="text-xs text-green-700">재직 생활지원사</div>
+                            </div>
+                          ) : jobTypeFilter === 'senior-social-worker' ? (
+                            // 선임전담사회복지사 필터링 시
+                            <div className="p-4 bg-indigo-100 rounded-md">
+                              <div className="text-lg font-semibold">
+                                {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
+                                  if (emp.jobType !== '선임전담사회복지사') return false;
+                                  
+                                  if (emp.resignDate) {
+                                    try {
+                                      const resignDate = new Date(emp.resignDate);
+                                      const today = new Date();
+                                      return resignDate > today;
+                                    } catch {
+                                      return false;
+                                    }
+                                  }
+                                  return emp.isActive;
+                                }).length}명
+                              </div>
+                              <div className="text-xs text-indigo-700">재직 선임전담사회복지사</div>
+                            </div>
+                          ) : jobTypeFilter === 'senior-life-support' ? (
+                            // 선임생활지원사 필터링 시
+                            <div className="p-4 bg-teal-100 rounded-md">
+                              <div className="text-lg font-semibold">
+                                {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
+                                  if (emp.jobType !== '생활지원사' || emp.responsibility !== '선임생활지원사') return false;
+                                  
+                                  if (emp.resignDate) {
+                                    try {
+                                      const resignDate = new Date(emp.resignDate);
+                                      const today = new Date();
+                                      return resignDate > today;
+                                    } catch {
+                                      return false;
+                                    }
+                                  }
+                                  return emp.isActive;
+                                }).length}명
+                              </div>
+                              <div className="text-xs text-teal-700">재직 선임생활지원사</div>
+                            </div>
+                          ) : jobTypeFilter === 'specialized' ? (
+                            // 특화 담당자 필터링 시
+                            <div className="p-4 bg-purple-100 rounded-md">
+                              <div className="text-lg font-semibold">
+                                {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
+                                  // 1. 담당업무가 '특화'인지 확인
+                                  const duty = emp.responsibility || emp['담당업무'] || '';
+                                  if (duty !== '특화') return false;
+                                  
+                                  // 2. 퇴사일이 없거나 공란이면 재직
+                                  const resignDate = emp.resignDate || emp['퇴사일'];
+                                  return !resignDate || resignDate === '' || resignDate === '-';
+                                }).length}명
+                              </div>
+                              <div className="text-xs text-purple-700">재직 특화 담당자</div>
                             </div>
                           ) : (
                             // 전체 보기 또는 기타 필터링 시에는 전체 재직자 수와 직무별 세부 수 표시
@@ -920,8 +1572,9 @@ export default function EmployeeDataPage() {
                               <div className="p-4 bg-blue-50 rounded-md">
                                 <div className="text-lg font-semibold">
                                   {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                    // 전담사회복지사인지 확인
+                                    // 전담사회복지사인지 확인 (전담사회복지사 + 선임전담사회복지사)
                                     const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
+                                    
                                     if (!isSocialWorker) return false;
                                     
                                     // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
@@ -960,6 +1613,44 @@ export default function EmployeeDataPage() {
                                 </div>
                                 <div className="text-xs text-green-600">생활지원사</div>
                               </div>
+                              <div className="p-4 bg-purple-50 rounded-md">
+                                <div className="text-lg font-semibold">
+                                  {(() => {
+                                    // 모든 responsibility 값 확인
+                                    const allResponsibilities = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).map(emp => emp.responsibility);
+                                    const uniqueResponsibilities = [...new Set(allResponsibilities)];
+                                    console.log('모든 responsibility 값들:', uniqueResponsibilities);
+                                    
+                                    const specializedEmployees = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
+                                      // responsibility가 '특화'인 직원만 (데이터 기반)
+                                      const isSpecialized = emp.responsibility === '특화';
+                                      
+                                      if (isSpecialized) {
+                                        console.log('특화 직원 발견:', emp.name, 'responsibility:', emp.responsibility, 'resignDate:', emp.resignDate, 'corrected:', emp.corrected);
+                                      }
+                                      
+                                      if (!isSpecialized) return false;
+                                      
+                                      // 재직 여부 확인
+                                      if (emp.corrected) return true;
+                                      if (!emp.resignDate || emp.resignDate === null || emp.resignDate === '' || emp.resignDate === '-') {
+                                        return true;
+                                      }
+                                      
+                                      try {
+                                        const resignDate = new Date(emp.resignDate);
+                                        return resignDate > new Date();
+                                      } catch {
+                                        return true;
+                                      }
+                                    });
+                                    
+                                    console.log(`🎯 특화 담당자 총 ${specializedEmployees.length}명 발견`);
+                                    return specializedEmployees.length;
+                                  })()}명
+                                </div>
+                                <div className="text-xs text-purple-600">특화 담당자</div>
+                              </div>
                             </>
                           )}
                         </div>
@@ -991,13 +1682,16 @@ export default function EmployeeDataPage() {
                             setJobTypeFilter(value);
                             setCurrentPage(1);
                           }}>
-                            <SelectTrigger className="w-full sm:w-40">
+                            <SelectTrigger className="w-full sm:w-48">
                               <SelectValue placeholder="직무 필터" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">전체 직무</SelectItem>
                               <SelectItem value="social-worker">전담사회복지사</SelectItem>
+                              <SelectItem value="senior-social-worker">선임전담사회복지사</SelectItem>
                               <SelectItem value="life-support">생활지원사</SelectItem>
+                              <SelectItem value="senior-life-support">선임생활지원사</SelectItem>
+                              <SelectItem value="specialized">특화 담당자</SelectItem>
                             </SelectContent>
                           </Select>
                           <Select value={itemsPerPage.toString()} onValueChange={(value) => {
@@ -1141,9 +1835,16 @@ export default function EmployeeDataPage() {
                                 <TableCell className="text-center border-r">{employee.modifiedDate || '-'}</TableCell>
                                 <TableCell className="border-r">{employee.mainDuty || employee.primaryWork || '-'}</TableCell>
                                 <TableCell className="text-center">
-                                  <Badge variant={employee.isActive ? 'default' : 'secondary'}>
-                                    {employee.isActive ? '재직' : '퇴직'}
-                                  </Badge>
+                                  {(() => {
+                                    // 퇴사일이 없거나 공란이면 재직
+                                    const resignDate = employee.resignDate || employee['퇴사일'];
+                                    const isActive = !resignDate || resignDate === '' || resignDate === '-';
+                                    return (
+                                      <Badge variant={isActive ? 'default' : 'secondary'}>
+                                        {isActive ? '재직' : '퇴직'}
+                                      </Badge>
+                                    );
+                                  })()}
                                 </TableCell>
                               </TableRow>
                             ))}
@@ -1156,8 +1857,19 @@ export default function EmployeeDataPage() {
               })()}
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+      
+      {/* 종사자 통계 섹션 추가 */}
+      <div className="mt-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl font-bold">종사자 통계 분석</CardTitle>
+            <CardDescription>종사자 현황에 대한 상세 통계 및 분석 정보</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EmployeeStatistics />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

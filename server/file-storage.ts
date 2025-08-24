@@ -17,6 +17,7 @@ function getElectronApp() {
 
 export class FileStorage implements IStorage {
   private dataDir: string;
+  private fileLocks: Map<string, Promise<void>> = new Map();
 
   constructor() {
     // Get user data directory
@@ -52,10 +53,35 @@ export class FileStorage implements IStorage {
   }
 
   private async writeJsonFile<T>(filename: string, data: T): Promise<void> {
+    // Wait for any existing lock on this file
+    const existingLock = this.fileLocks.get(filename);
+    if (existingLock) {
+      await existingLock;
+    }
+
+    // Create new lock for this file
+    const lockPromise = this.performFileWrite(filename, data);
+    this.fileLocks.set(filename, lockPromise);
+    
+    try {
+      await lockPromise;
+    } finally {
+      // Clean up lock when done
+      if (this.fileLocks.get(filename) === lockPromise) {
+        this.fileLocks.delete(filename);
+      }
+    }
+  }
+
+  private async performFileWrite<T>(filename: string, data: T): Promise<void> {
     try {
       await this.ensureDataDir();
       const filePath = this.getFilePath(filename);
-      await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      
+      // Write to temporary file first, then rename for atomic operation
+      const tempPath = `${filePath}.tmp`;
+      await fs.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+      await fs.rename(tempPath, filePath);
     } catch (error) {
       console.error(`Failed to write ${filename}:`, error);
       throw error;
@@ -109,6 +135,23 @@ export class FileStorage implements IStorage {
     }
     
     await this.writeJsonFile('education-participants', participants);
+  }
+
+  async saveEducationParticipants(participants: EducationParticipant[]): Promise<void> {
+    await this.writeJsonFile('education-participants', participants);
+  }
+
+  async batchSaveEducationParticipants(newParticipants: EducationParticipant[]): Promise<void> {
+    const existingParticipants = await this.getEducationParticipants();
+    const participantMap = new Map(existingParticipants.map(p => [p.id, p]));
+    
+    // Update or add new participants
+    for (const participant of newParticipants) {
+      participantMap.set(participant.id, participant);
+    }
+    
+    const updatedParticipants = Array.from(participantMap.values());
+    await this.writeJsonFile('education-participants', updatedParticipants);
   }
 
   async updateEducationParticipant(id: string, participant: Partial<EducationParticipant>): Promise<void> {

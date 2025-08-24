@@ -8,7 +8,7 @@ import {
 import { Users, TrendingUp, Calendar, Award, Briefcase, MapPin, Clock, UserCheck } from 'lucide-react';
 
 function EmployeeStatsPage() {
-  const { employeeData = [], setEmployeeData } = useEmployeeStore();
+  const { employeeData = [], setEmployeeData, loadInstitutionData } = useEmployeeStore();
   const [isLoading, setIsLoading] = useState(true);
   const [stats, setStats] = useState({
     total: 0,
@@ -25,9 +25,12 @@ function EmployeeStatsPage() {
 
   // 데이터 로드
   useEffect(() => {
-    const fetchEmployeeData = async () => {
+    const fetchData = async () => {
       setIsLoading(true);
       try {
+        // 기관 데이터 로드
+        await loadInstitutionData();
+        
         // 전체 데이터를 가져오기 위해 limit을 크게 설정
         const response = await fetch('/api/employees?page=1&limit=10000');
         if (response.ok) {
@@ -35,14 +38,14 @@ function EmployeeStatsPage() {
           setEmployeeData(result.data || []);
         }
       } catch (error) {
-        console.error('Failed to fetch employee data:', error);
+        console.error('Failed to fetch data:', error);
       } finally {
         setIsLoading(false);
       }
     };
 
     // 항상 최신 데이터를 가져오기
-    fetchEmployeeData();
+    fetchData();
   }, []);
 
   // 통계 계산
