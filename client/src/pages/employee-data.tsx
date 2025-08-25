@@ -1168,8 +1168,9 @@ export default function EmployeeDataPage() {
       if (item.jobType !== '생활지원사' || item.responsibility !== '선임생활지원사') return false;
     }
     if (jobTypeFilter === 'specialized') {
-      // 특화 담당자 (responsibility가 '특화'인 직원)
-      if (item.responsibility !== '특화') return false;
+      // 특화 담당자 (여러 담당업무 필드에서 '특화' 확인)
+      const duty = item.responsibility || item.duty || item.mainDuty || item.primaryWork || item.mainTasks || item['담당업무'] || '';
+      if (duty !== '특화') return false;
     }
     
     // 검색어 필터링
@@ -1617,16 +1618,25 @@ export default function EmployeeDataPage() {
                                 <div className="text-lg font-semibold">
                                   {(() => {
                                     // 모든 responsibility 값 확인
+                                    // 모든 담당업무 관련 필드들 확인
                                     const allResponsibilities = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).map(emp => emp.responsibility);
                                     const uniqueResponsibilities = [...new Set(allResponsibilities)];
                                     console.log('모든 responsibility 값들:', uniqueResponsibilities);
                                     
+                                    // 다른 담당업무 필드들도 확인
+                                    const allDuties = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).map(emp => 
+                                      emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || ''
+                                    );
+                                    const uniqueDuties = [...new Set(allDuties.filter(d => d !== ''))];
+                                    console.log('모든 담당업무 필드 값들:', uniqueDuties);
+                                    
                                     const specializedEmployees = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                      // responsibility가 '특화'인 직원만 (데이터 기반)
-                                      const isSpecialized = emp.responsibility === '특화';
+                                      // 여러 담당업무 필드에서 '특화' 확인 (employee-statistics.tsx와 동일한 로직)
+                                      const duty = emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+                                      const isSpecialized = duty === '특화';
                                       
                                       if (isSpecialized) {
-                                        console.log('특화 직원 발견:', emp.name, 'responsibility:', emp.responsibility, 'resignDate:', emp.resignDate, 'corrected:', emp.corrected);
+                                        console.log('특화 직원 발견:', emp.name, 'duty:', duty, 'responsibility:', emp.responsibility, 'resignDate:', emp.resignDate, 'corrected:', emp.corrected);
                                       }
                                       
                                       if (!isSpecialized) return false;

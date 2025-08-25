@@ -57,8 +57,16 @@ export default function ParticipantsPage() {
   const [selectedInconsistency, setSelectedInconsistency] = useState<any>(null);
   const [selectedInconsistencyType, setSelectedInconsistencyType] = useState<string>('all');
   const [showFullTable, setShowFullTable] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>('statistics'); // 교육통계를 기본 탭으로
+  const [activeTab, setActiveTab] = useState<string>('list'); // 소속 회원 목록을 기본 탭으로
+  const [institutionPage, setInstitutionPage] = useState(1); // 기관별 분석 페이지
+  const [institutionsPerPage] = useState(10); // 페이지당 기관 수
   const { toast } = useToast();
+  
+  // 강제 데이터 새로고침 함수
+  const forceRefreshData = useCallback(() => {
+    console.log('🔄 강제 데이터 새로고침 시작...');
+    fetchParticipantData();
+  }, []);
   
   // 불일치 유형별 권장조치 함수
   const getRecommendedActions = (inconsistency: any) => {
@@ -278,7 +286,12 @@ export default function ParticipantsPage() {
       // Priority 1: Load only essential data first (participants)
       if (!isLoaded?.participant) {
         console.log('📊 Loading participant data (priority)...');
-        await loadLazyData('participant');
+        setIsLoading(true);
+        try {
+          await loadLazyData('participant');
+        } finally {
+          setIsLoading(false);
+        }
       }
       
       // Priority 2: Load other data in background with delay
@@ -496,6 +509,17 @@ export default function ParticipantsPage() {
 
   // 🎯 Optimized participant stats with caching and worker support
   const participantStats = useMemo(() => {
+    // 로딩중이면 이전 값 유지 또는 기본값 반환
+    if (isLoading) {
+      return { 
+        allParticipants: [], 
+        activeParticipants: [], 
+        totalCount: 0, 
+        activeCount: 0,
+        stats: { total: 0, complete: 0, partial: 0, inProgress: 0, none: 0 }
+      };
+    }
+    
     if (!participantData || participantData.length === 0) {
       return { 
         allParticipants: [], 
@@ -548,7 +572,7 @@ export default function ParticipantsPage() {
     };
     
     return computeStats();
-  }, [participantData, basicEducationData, advancedEducationData]);
+  }, [participantData, basicEducationData, advancedEducationData, isLoading]);
 
   // 기존 로직도 유지 (비교용)
   const allParticipantStatusList = useMemo(() => getAllParticipantEducationStatus(), [participantData, getAllParticipantEducationStatus]);
@@ -558,7 +582,6 @@ export default function ParticipantsPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   const loadInconsistencyAnalysis = useCallback(async () => {
-    if (isAnalyzing) return;
     if (!employeeData || !Array.isArray(employeeData) || employeeData.length === 0) {
       console.warn('❌ Cannot run inconsistency analysis: no employee data available');
       return;
@@ -586,11 +609,11 @@ export default function ParticipantsPage() {
     } else {
       setTimeout(runAnalysis, 100);
     }
-  }, [employeeData, getDataInconsistencies, isAnalyzing]);
+  }, [employeeData, getDataInconsistencies]);
   
   // Only run analysis when inconsistency tab is accessed
   useEffect(() => {
-    if (activeTab === 'inconsistencies') {
+    if (activeTab === 'inconsistencies' && !isAnalyzing) {
       loadInconsistencyAnalysis();
     }
   }, [activeTab, loadInconsistencyAnalysis]);
@@ -722,10 +745,6 @@ export default function ParticipantsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="upload">
-            <Upload className="h-4 w-4 mr-2" />
-            데이터 업로드
-          </TabsTrigger>
           <TabsTrigger value="list">
             <List className="h-4 w-4 mr-2" />
             소속 회원 목록 ({participantData?.length || 0})
@@ -758,103 +777,99 @@ export default function ParticipantsPage() {
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="statistics" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <BarChart3 className="h-5 w-5" />
-                교육 수료 통계
-              </CardTitle>
-              <CardDescription>
-                소속 회원들의 교육 수료 현황을 통계로 확인합니다
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {!participantData || participantData.length === 0 ? (
-                <div className="text-center py-8">
-                  <div className="text-muted-foreground">
-                    아직 업로드된 소속 회원 데이터가 없습니다.
+        <TabsContent value="list" className="mt-6 space-y-6">
+          {/* 데이터 업로드 섹션 - 접을 수 있는 UI */}
+          <Collapsible defaultOpen={!participantData || participantData.length === 0}>
+            <Card>
+              <CardHeader>
+                <CollapsibleTrigger className="flex items-center justify-between w-full hover:opacity-80 transition-opacity">
+                  <div className="flex items-center gap-2">
+                    <Upload className="h-5 w-5 text-blue-600" />
+                    <CardTitle className="text-lg">데이터 업로드</CardTitle>
                   </div>
-                  <Button 
-                    variant="outline" 
-                    className="mt-4"
-                    onClick={() => setActiveTab('upload')}
-                  >
-                    데이터 업로드하기
-                  </Button>
+                  <ChevronDown className="h-4 w-4 transition-transform duration-200 data-[state=open]:rotate-180" />
+                </CollapsibleTrigger>
+                <CardDescription>
+                  Excel 파일을 통해 참가자 정보를 업로드하고 관리합니다
+                </CardDescription>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className="space-y-6">
+                  <DateUploadForm
+                    onUpload={handleDateUpload}
+                    isUploading={isUploading}
+                    title="참가자 데이터 업로드"
+                    description="Excel 파일을 통해 참가자 정보를 특정 날짜 기준으로 업로드합니다"
+                  />
+                  
+                  <div className="flex gap-2">
+                    <Button
+                      variant="destructive"
+                      onClick={handleClearData}
+                      disabled={isLoading || !participantData || participantData.length === 0}
+                    >
+                      데이터 초기화
+                    </Button>
+                  </div>
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+
+          {/* 교육 수료 통계 카드 */}
+          {participantData && participantData.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  교육 수료 통계
+                </CardTitle>
+                <CardDescription>
+                  소속 회원들의 교육 수료 현황을 통계로 확인합니다
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                  <Card className="p-4 text-center border-l-4 border-l-blue-400">
+                    <div className="text-2xl font-bold text-blue-600">{participantStats.stats.total}</div>
+                    <div className="text-xs text-muted-foreground">재직자 ('정상' 상태)</div>
+                    <div className="text-xs text-gray-500">전체: {participantStats.totalCount}명</div>
+                  </Card>
+                  <Card className="p-4 text-center border-l-4 border-l-green-500">
+                    <div className="text-2xl font-bold text-green-600">{participantStats.stats.complete}</div>
+                    <div className="text-xs text-muted-foreground">🟢 완전수료</div>
+                    <div className="text-xs text-green-600 font-medium">
+                      {participantStats.stats.total > 0 ? Math.round((participantStats.stats.complete / participantStats.stats.total) * 100) : 0}%
+                    </div>
+                  </Card>
+                  <Card className="p-4 text-center border-l-4 border-l-yellow-500">
+                    <div className="text-2xl font-bold text-yellow-600">{participantStats.stats.partial}</div>
+                    <div className="text-xs text-muted-foreground">🟡 부분수료</div>
+                    <div className="text-xs text-yellow-600 font-medium">
+                      {participantStats.stats.total > 0 ? Math.round((participantStats.stats.partial / participantStats.stats.total) * 100) : 0}%
+                    </div>
+                  </Card>
+                  <Card className="p-4 text-center border-l-4 border-l-blue-500">
+                    <div className="text-2xl font-bold text-blue-600">{participantStats.stats.inProgress}</div>
+                    <div className="text-xs text-muted-foreground">⚪ 진행중</div>
+                    <div className="text-xs text-blue-600 font-medium">
+                      {participantStats.stats.total > 0 ? Math.round((participantStats.stats.inProgress / participantStats.stats.total) * 100) : 0}%
+                    </div>
+                  </Card>
+                  <Card className="p-4 text-center border-l-4 border-l-red-500">
+                    <div className="text-2xl font-bold text-red-600">{participantStats.stats.none}</div>
+                    <div className="text-xs text-muted-foreground">🔴 미수료</div>
+                    <div className="text-xs text-red-600 font-medium">
+                      {participantStats.stats.total > 0 ? Math.round((participantStats.stats.none / participantStats.stats.total) * 100) : 0}%
+                    </div>
+                  </Card>
                 </div>
-              ) : (
-                <>
-                  {/* 통계 요약 - 소속회원 기준 정확한 통계 ('정상' 상태만) */}
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                    <Card className="p-4 text-center border-l-4 border-l-blue-400">
-                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.total}</div>
-                      <div className="text-xs text-muted-foreground">재직자 ('정상' 상태)</div>
-                      <div className="text-xs text-gray-500">전체: {participantStats.totalCount}명</div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-green-500">
-                      <div className="text-2xl font-bold text-green-600">{participantStats.stats.complete}</div>
-                      <div className="text-xs text-muted-foreground">🟢 완전수료</div>
-                      <div className="text-xs text-green-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.complete / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-yellow-500">
-                      <div className="text-2xl font-bold text-yellow-600">{participantStats.stats.partial}</div>
-                      <div className="text-xs text-muted-foreground">🟡 부분수료</div>
-                      <div className="text-xs text-yellow-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.partial / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-blue-500">
-                      <div className="text-2xl font-bold text-blue-600">{participantStats.stats.inProgress}</div>
-                      <div className="text-xs text-muted-foreground">⚪ 진행중</div>
-                      <div className="text-xs text-blue-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.inProgress / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                    <Card className="p-4 text-center border-l-4 border-l-red-500">
-                      <div className="text-2xl font-bold text-red-600">{participantStats.stats.none}</div>
-                      <div className="text-xs text-muted-foreground">🔴 미수료</div>
-                      <div className="text-xs text-red-600 font-medium">
-                        {participantStats.stats.total > 0 ? Math.round((participantStats.stats.none / participantStats.stats.total) * 100) : 0}%
-                      </div>
-                    </Card>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
 
-        <TabsContent value="upload" className="mt-6">
-          <div className="space-y-6">
-            <DateUploadForm
-              onUpload={handleDateUpload}
-              isUploading={isUploading}
-              title="참가자 데이터 업로드"
-              description="Excel 파일을 통해 참가자 정보를 특정 날짜 기준으로 업로드합니다"
-            />
-          </div>
-          
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">데이터 관리</CardTitle>
-              <CardDescription>소속 회원 데이터를 관리합니다</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button
-                variant="destructive"
-                onClick={handleClearData}
-                disabled={isLoading || !participantData || participantData.length === 0}
-              >
-                데이터 초기화
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
+              </CardContent>
+            </Card>
+          )}
 
-        <TabsContent value="list" className="mt-6">
+          {/* 소속 회원 교육 이수 현황 카드 */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
@@ -870,7 +885,7 @@ export default function ParticipantsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={fetchParticipantData}
+                  onClick={forceRefreshData}
                   disabled={isLoading}
                 >
                   <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
@@ -905,9 +920,15 @@ export default function ParticipantsPage() {
                     <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
                       <div className="flex items-center gap-4">
                         <div className="p-3 bg-muted rounded-md">
-                          <div className="text-lg font-semibold">{filteredData.length}명</div>
+                          <div className="text-lg font-semibold">
+                            {searchTerm || statusFilter !== 'all' || jobTypeFilter !== 'all' || activeStatusFilter !== 'all' 
+                              ? `${filteredData.length}명` 
+                              : `${participantStats.stats.total}명`}
+                          </div>
                           <div className="text-xs text-muted-foreground">
-                            {searchTerm || statusFilter !== 'all' || jobTypeFilter !== 'all' || activeStatusFilter !== 'all' ? `필터된 결과 (정상상태 ${participantStats.stats.total}명 중)` : '전체 정상상태 회원'}
+                            {searchTerm || statusFilter !== 'all' || jobTypeFilter !== 'all' || activeStatusFilter !== 'all' 
+                              ? `필터된 결과 (정상상태 ${participantStats.stats.total}명 중)` 
+                              : `전체 정상상태 회원 (총 ${participantStats.totalCount}명 중)`}
                           </div>
                         </div>
                       </div>
@@ -1120,6 +1141,220 @@ export default function ParticipantsPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* 기관별 교육이수 현황 분석 카드 */}
+          {participantData && participantData.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  📊 기관별 교육이수 현황 분석
+                </CardTitle>
+                <CardDescription>
+                  소속 기관별 교육 수료 현황을 상세 분석합니다 (폐지 기관 제외)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {(() => {
+                    // 통합된 데이터 사용 (교육 상태가 매칭된 데이터) - 폐지 기관 제외
+                    const allActiveMembers = participantStats.activeParticipants || participantStats.allParticipants || [];
+                    const closedKeywords = ['폐지', '종료', '중단', '해지', '해산', '폐쇄', '중지', '종료예정'];
+                    const activeMembers = allActiveMembers.filter(member => {
+                      const institution = member.institution || '';
+                      return !closedKeywords.some(keyword => 
+                        institution.toLowerCase().includes(keyword.toLowerCase())
+                      );
+                    });
+                    
+                    const institutionStats = activeMembers.reduce((acc, member) => {
+                      const institution = member.institution || '소속기관 미상';
+                      const jobType = member.jobType || '직군 미상';
+                      
+                      // 수료 상태 다시 계산 (더 정확한 판정)
+                      const basicCompleted = member.basicEducationStatus === '수료' || 
+                                            member.basicEducationStatus === '완료' ||
+                                            member.basicTraining === '수료' ||
+                                            member.basicTraining === '완료';
+                      const advancedCompleted = member.advancedEducationStatus === '수료' || 
+                                               member.advancedEducationStatus === '완료' ||
+                                               member.advancedEducation === '수료' ||
+                                               member.advancedEducation === '완료';
+                      
+                      let completionStatus = 'none';
+                      if (basicCompleted && advancedCompleted) {
+                        completionStatus = 'complete';
+                      } else if (basicCompleted || advancedCompleted) {
+                        completionStatus = 'partial';
+                      } else if (member.basicEducationStatus || member.advancedEducationStatus || 
+                                member.basicTraining || member.advancedEducation) {
+                        completionStatus = 'inProgress';
+                      }
+                      
+                      // 기관명 정규화 (매칭 개선)
+                      const normalizedInstitution = institution.replace(/\s+/g, '').toLowerCase();
+                      const displayInstitution = institution;
+                      
+                      if (!acc[displayInstitution]) {
+                        acc[displayInstitution] = {
+                          total: 0,
+                          전담사회복지사: { total: 0, complete: 0, partial: 0, inProgress: 0, none: 0 },
+                          생활지원사: { total: 0, complete: 0, partial: 0, inProgress: 0, none: 0 }
+                        };
+                      }
+                      
+                      acc[displayInstitution].total++;
+                      if (acc[displayInstitution][jobType]) {
+                        acc[displayInstitution][jobType].total++;
+                        acc[displayInstitution][jobType][completionStatus]++;
+                      }
+                      
+                      return acc;
+                    }, {});
+
+                    // 모든 기관을 완전수료율 순으로 정렬 (우수기관 먼저, 개선필요 기관 마지막)
+                    const allInstitutions = Object.entries(institutionStats)
+                      .map(([institution, stats]) => {
+                        const completionRate = stats.total > 0 
+                          ? Math.round(((stats.전담사회복지사.complete + stats.생활지원사.complete) / stats.total) * 100)
+                          : 0;
+                        return { institution, stats, completionRate };
+                      })
+                      .sort((a, b) => {
+                        // 1차: 완전수료율 높은 순 (우수기관 먼저)
+                        if (b.completionRate !== a.completionRate) {
+                          return b.completionRate - a.completionRate;
+                        }
+                        // 2차: 총 인원수 많은 순
+                        return b.stats.total - a.stats.total;
+                      });
+
+                    // 페이지네이션 계산
+                    const totalInstitutions = allInstitutions.length;
+                    const totalPages = Math.ceil(totalInstitutions / institutionsPerPage);
+                    const startIndex = (institutionPage - 1) * institutionsPerPage;
+                    const endIndex = startIndex + institutionsPerPage;
+                    const currentInstitutions = allInstitutions.slice(startIndex, endIndex);
+
+                    return (
+                      <>
+                        {/* 기관별 분석 헤더 */}
+                        <div className="flex justify-between items-center mb-4">
+                          <div className="text-sm text-gray-600">
+                            전체 {totalInstitutions}개 기관 중 {startIndex + 1}-{Math.min(endIndex, totalInstitutions)}번째 
+                            (페이지 {institutionPage}/{totalPages})
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setInstitutionPage(Math.max(1, institutionPage - 1))}
+                              disabled={institutionPage === 1}
+                            >
+                              이전
+                            </Button>
+                            <span className="text-sm px-3 py-1 bg-gray-100 rounded">
+                              {institutionPage} / {totalPages}
+                            </span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setInstitutionPage(Math.min(totalPages, institutionPage + 1))}
+                              disabled={institutionPage === totalPages}
+                            >
+                              다음
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {currentInstitutions.map(({ institution, stats, completionRate }) => (
+                            <Card key={institution} className={`p-5 transition-all duration-200 hover:shadow-md ${
+                              completionRate >= 80 ? 'border-l-4 border-l-green-500 bg-green-50/30' :
+                              completionRate >= 60 ? 'border-l-4 border-l-yellow-500 bg-yellow-50/30' :
+                              'border-l-4 border-l-red-500 bg-red-50/30'
+                            }`}>
+                              <div className="space-y-4">
+                                {/* 기관명 및 등급 */}
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1 pr-3">
+                                    <h3 className="font-semibold text-base text-gray-800 leading-tight mb-1" title={institution}>
+                                      {institution.length > 25 ? `${institution.substring(0, 25)}...` : institution}
+                                    </h3>
+                                    <div className="flex items-center gap-3 text-sm text-gray-600">
+                                      <span className="font-medium">총 {stats.total}명</span>
+                                      <span className="text-gray-400">•</span>
+                                      <span className={`font-semibold ${
+                                        completionRate >= 80 ? 'text-green-600' :
+                                        completionRate >= 60 ? 'text-yellow-600' :
+                                        'text-red-600'
+                                      }`}>
+                                        완전수료율 {completionRate}%
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className={`px-3 py-2 rounded-lg font-bold text-sm ${
+                                    completionRate >= 80 ? 'bg-green-100 text-green-800' :
+                                    completionRate >= 60 ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {completionRate >= 80 ? '🏆 우수' : completionRate >= 60 ? '📊 보통' : '⚠️ 개선필요'}
+                                  </div>
+                                </div>
+
+                                {/* 진행률 바 - 상단으로 이동 */}
+                                <div className="space-y-2">
+                                  <div className="w-full bg-gray-200 rounded-full h-2">
+                                    <div 
+                                      className={`h-2 rounded-full transition-all duration-500 ${
+                                        completionRate >= 80 ? 'bg-green-400' :
+                                        completionRate >= 60 ? 'bg-yellow-400' :
+                                        'bg-red-400'
+                                      }`}
+                                      style={{ width: `${completionRate}%` }}
+                                    />
+                                  </div>
+                                </div>
+                                
+                                {/* 직군별 상세 통계 - 단순화된 레이아웃 */}
+                                <div className="grid grid-cols-2 gap-4 text-sm">
+                                  <div className="bg-gray-50 p-3 rounded-lg border">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <h4 className="text-gray-800 font-medium">전담사회복지사</h4>
+                                      <span className="bg-white text-gray-700 text-xs font-semibold px-2 py-1 rounded border">
+                                        {stats.전담사회복지사.total}명
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-gray-600 space-y-1">
+                                      <div>• 완전 {stats.전담사회복지사.complete} • 부분 {stats.전담사회복지사.partial}</div>
+                                      <div>• 진행 {stats.전담사회복지사.inProgress} • 미수료 {stats.전담사회복지사.none}</div>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="bg-gray-50 p-3 rounded-lg border">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <h4 className="text-gray-800 font-medium">생활지원사</h4>
+                                      <span className="bg-white text-gray-700 text-xs font-semibold px-2 py-1 rounded border">
+                                        {stats.생활지원사.total}명
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-gray-600 space-y-1">
+                                      <div>• 완전 {stats.생활지원사.complete} • 부분 {stats.생활지원사.partial}</div>
+                                      <div>• 진행 {stats.생활지원사.inProgress} • 미수료 {stats.생활지원사.none}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="inconsistencies" className="mt-6">

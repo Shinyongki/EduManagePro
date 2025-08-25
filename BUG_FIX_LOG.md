@@ -1416,3 +1416,149 @@ if (empStr.includes('이정민') || emp.name === '특화') {
 - **사용자 관점**: 기술적 완벽성보다 사용자가 원하는 결과 달성이 우선
 
 ---
+
+## 📋 수정 기록 #007 - 특화 담당자 집계 로직 수정 및 필터링 개선
+
+**수정일**: 2025-08-25  
+**담당자**: Claude  
+**심각도**: 🟡 Medium
+
+### 🚨 발생한 문제
+
+1. **특화 담당자 집계 오류**
+   - 종사자 데이터에서 재직중인 특화 담당자가 0명으로 표시
+   - 이전에는 21명이 정상적으로 표시되었으나 수정 과정에서 문제 발생
+   - 통계 표시와 검색/필터링에서 모두 0명으로 나타남
+
+2. **담당업무 필드 매칭 불일치**
+   - 통계 표시: 여러 담당업무 필드를 확인하는 포괄적 로직
+   - 검색 필터링: `responsibility` 필드만 확인하는 제한적 로직
+   - 실제 데이터에서는 다양한 필드(`duty`, `mainDuty`, `primaryWork`, `mainTasks`, `담당업무` 등)에 특화 정보 저장
+
+3. **사용자 경험 문제**
+   - 특화 담당자 검색 시 결과가 나오지 않음
+   - 전체 재직자 수와 전담사회복지사 수 계산에 특화 담당자가 누락되어 통계 불일치
+
+### 🔍 원인 분석
+
+1. **통계 표시 로직 (올바름)**
+   ```typescript
+   // employee-data.tsx (라인 1624-1650)
+   // 여러 담당업무 필드에서 '특화' 확인
+   const duty = emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+   const isSpecialized = duty === '특화';
+   ```
+
+2. **필터링 로직 (문제)**
+   ```typescript
+   // employee-data.tsx (라인 1170-1172)  
+   // responsibility 필드만 확인
+   if (jobTypeFilter === 'specialized') {
+     if (item.responsibility !== '특화') return false;
+   ```
+
+3. **데이터 저장 구조**
+   - 특화 담당자 정보가 `responsibility` 외의 다른 필드에도 저장됨
+   - 엑셀 업로드 시 컬럼 매핑에 따라 다양한 필드에 분산 저장
+   - 기존에 올바르게 작동했던 것은 통계 표시 로직이 포괄적이었기 때문
+
+### 🛠️ 수정 내용
+
+#### 1. 통계 표시 로직 수정 (이미 올바름을 확인)
+
+**파일**: `client/src/pages/employee-data.tsx` (라인 1624-1650)
+
+**기존 로직**:
+```typescript
+// 수정 전: responsibility만 확인
+const isSpecialized = emp.responsibility === '특화';
+```
+
+**수정된 로직**:
+```typescript
+// 수정 후: 여러 담당업무 필드에서 '특화' 확인 (employee-statistics.tsx와 동일한 로직)
+const duty = emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+const isSpecialized = duty === '특화';
+
+if (isSpecialized) {
+  console.log('특화 직원 발견:', emp.name, 'duty:', duty, 'responsibility:', emp.responsibility, 'resignDate:', emp.resignDate, 'corrected:', emp.corrected);
+}
+```
+
+#### 2. 검색 필터링 로직 수정
+
+**파일**: `client/src/pages/employee-data.tsx` (라인 1170-1174)
+
+**수정 전**:
+```typescript
+if (jobTypeFilter === 'specialized') {
+  // 특화 담당자 (responsibility가 '특화'인 직원)
+  if (item.responsibility !== '특화') return false;
+}
+```
+
+**수정 후**:
+```typescript
+if (jobTypeFilter === 'specialized') {
+  // 특화 담당자 (여러 담당업무 필드에서 '특화' 확인)
+  const duty = item.responsibility || item.duty || item.mainDuty || item.primaryWork || item.mainTasks || item['담당업무'] || '';
+  if (duty !== '특화') return false;
+}
+```
+
+#### 3. 디버깅 로그 강화
+
+**추가된 로그**:
+```typescript
+// 모든 담당업무 관련 필드들 확인
+const allDuties = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).map(emp => 
+  emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || ''
+);
+const uniqueDuties = [...new Set(allDuties.filter(d => d !== ''))];
+console.log('모든 담당업무 필드 값들:', uniqueDuties);
+```
+
+### ✅ 수정 결과
+
+1. **특화 담당자 정상 집계**
+   - 통계 표시: 21명 ✅
+   - 검색 필터링: 21명 ✅  
+   - 두 로직 모두 동일한 결과 출력
+
+2. **전체 재직자 수 정확성 확보**
+   - 특화 담당자 21명이 전담사회복지사로 분류
+   - 전체 재직자 수에 정확히 반영
+   - 통계 일관성 확보
+
+3. **사용자 경험 개선**
+   - "특화 담당자" 필터 검색 시 정상 작동 ✅
+   - 검색 결과와 통계 수치 일치 ✅
+   - 다양한 담당업무 필드에서 특화 정보 검색 가능
+
+4. **로직 일관성 확보**
+   - employee-statistics.tsx와 employee-data.tsx의 특화 담당자 검색 로직 통일
+   - 모든 페이지에서 동일한 특화 담당자 집계 방식 사용
+
+### 🔮 향후 개선사항
+
+1. **담당업무 필드 통합**
+   - 다양한 담당업무 필드를 하나의 표준 필드로 통합하는 유틸리티 함수
+   - 업로드 시점에 담당업무 정보 정규화
+
+2. **자동 검증 시스템**
+   - 통계 표시와 필터링 로직 일관성 자동 검증
+   - 특화 담당자 수 불일치 발생 시 자동 알림
+
+3. **데이터 품질 향상**
+   - 담당업무 필드 표준화
+   - 중복 필드 제거 및 데이터 정리
+
+### 📝 학습 포인트
+
+- **로직 일관성의 중요성**: 동일한 대상을 처리하는 여러 함수는 반드시 같은 로직을 사용해야 함
+- **데이터 저장 구조 파악**: 실제 데이터가 어떤 필드에 저장되어 있는지 정확히 파악 필요
+- **포괄적 검색 로직**: 사용자 입력 데이터의 다양성을 고려한 유연한 검색 로직 구현
+- **디버깅 로그 활용**: 문제 원인 파악을 위한 상세한 로깅의 중요성
+- **테스트 케이스 확장**: 통계와 필터링이 동일한 결과를 반환하는지 검증 필요
+
+---

@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
+import { extractSido, extractSigungu } from "@/utils/institution-matcher";
 
 // Mock data structure for integrated analysis
 interface IntegratedAnalysisData {
@@ -593,8 +594,12 @@ export default function AdvancedEducationPage() {
                               </div>
                             </TableCell>
                             <TableCell className="text-center border-r">{item.institutionType || '-'}</TableCell>
-                            <TableCell className="text-center border-r">{item.region || '-'}</TableCell>
-                            <TableCell className="text-center border-r">{item.district || '-'}</TableCell>
+                            <TableCell className="text-center border-r">
+                              {item.region || extractSido(item.institution) || '-'}
+                            </TableCell>
+                            <TableCell className="text-center border-r">
+                              {item.district || extractSigungu(item.institution) || '-'}
+                            </TableCell>
                             <TableCell className="text-center border-r">{item.jobType || '-'}</TableCell>
                             <TableCell className="font-medium text-center border-r">{item.name}</TableCell>
                             <TableCell className="text-center border-r font-mono">{item.id}</TableCell>

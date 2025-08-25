@@ -14,6 +14,101 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import * as cheerio from "cheerio";
 
+// 기관명에서 시도 정보 추출
+function extractSidoFromName(institutionName: string | undefined): string | undefined {
+  if (!institutionName) return undefined;
+  
+  const normalizedName = institutionName.toLowerCase();
+  
+  // 시/도 매핑
+  const sidoMap: Record<string, string> = {
+    '서울': '서울특별시',
+    '부산': '부산광역시', 
+    '대구': '대구광역시',
+    '인천': '인천광역시',
+    '광주': '광주광역시',
+    '대전': '대전광역시',
+    '울산': '울산광역시',
+    '세종': '세종특별자치시',
+    '경기': '경기도',
+    '강원': '강원특별자치도',
+    '충북': '충청북도',
+    '충남': '충청남도', 
+    '전북': '전북특별자치도',
+    '전남': '전라남도',
+    '경북': '경상북도',
+    '경남': '경상남도',
+    '제주': '제주특별자치도'
+  };
+  
+  // 정확한 시도명이 포함된 경우
+  for (const [key, value] of Object.entries(sidoMap)) {
+    if (normalizedName.includes(key.toLowerCase()) || 
+        normalizedName.includes(value.toLowerCase())) {
+      return value;
+    }
+  }
+  
+  // 특정 지역명으로 시도 추정
+  const regionToSido: Record<string, string> = {
+    '창원': '경상남도', '진주': '경상남도', '통영': '경상남도', '사천': '경상남도',
+    '김해': '경상남도', '밀양': '경상남도', '거제': '경상남도', '양산': '경상남도',
+    '수원': '경기도', '성남': '경기도', '안양': '경기도', '부천': '경기도',
+    '강남': '서울특별시', '서초': '서울특별시', '송파': '서울특별시', '강동': '서울특별시'
+  };
+  
+  for (const [region, sido] of Object.entries(regionToSido)) {
+    if (normalizedName.includes(region.toLowerCase())) {
+      return sido;
+    }
+  }
+  
+  return undefined;
+}
+
+// 기관명에서 시군구 정보 추출  
+function extractSigunguFromName(institutionName: string | undefined): string | undefined {
+  if (!institutionName) return undefined;
+  
+  const normalizedName = institutionName.toLowerCase();
+  
+  // 시/군/구 키워드 매핑
+  const sigunguPatterns = [
+    // 서울특별시 구
+    '강남구', '서초구', '송파구', '강동구', '마포구', '종로구', '중구', '용산구',
+    '성동구', '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '노원구',
+    '은평구', '서대문구', '양천구', '강서구', '구로구', '금천구', '영등포구', '동작구', '관악구',
+    
+    // 경기도 시/군
+    '수원시', '성남시', '안양시', '부천시', '광명시', '평택시', '동두천시', '안산시',
+    '고양시', '과천시', '구리시', '남양주시', '오산시', '시흥시', '군포시', '의왕시',
+    '하남시', '용인시', '파주시', '이천시', '안성시', '김포시', '화성시', '광주시',
+    '양주시', '포천시', '여주시', '연천군', '가평군', '양평군',
+    
+    // 경상남도 시/군
+    '창원시', '진주시', '통영시', '사천시', '김해시', '밀양시', '거제시', '양산시',
+    '의령군', '함안군', '창녕군', '고성군', '남해군', '하동군', '산청군', '함양군',
+    '거창군', '합천군'
+  ];
+  
+  // 정확한 매칭 우선
+  for (const pattern of sigunguPatterns) {
+    if (normalizedName.includes(pattern.toLowerCase())) {
+      return pattern;
+    }
+  }
+  
+  // 부분 매칭 (시, 군, 구 제거)
+  const partialPatterns = sigunguPatterns.map(p => p.replace(/(시|군|구)$/, ''));
+  for (let i = 0; i < partialPatterns.length; i++) {
+    if (normalizedName.includes(partialPatterns[i].toLowerCase())) {
+      return sigunguPatterns[i];
+    }
+  }
+  
+  return undefined;
+}
+
 // 복합 헤더 처리 함수
 function processComplexHeaders(rawData: any[][], sheetName: string): any[] {
   // 첫 번째 행은 스킵 (인덱스 0)
@@ -767,8 +862,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             year: row['년도/차수'] || row['년도차수'] || row['년도'] || row['차수'] || undefined,
             applicationDate: parseDate(row['교육신청일자'])?.toISOString() || undefined,
             institutionType: row['수행기관명유형'] || undefined,
-            region: row['시도'] || undefined,
-            district: row['시군구'] || undefined,
+            region: row['시도'] || row['광역시'] || row['광역명'] || row['시·도'] || extractSidoFromName(row['수행기관명']) || undefined,
+            district: row['시군구'] || row['지자체'] || row['시·군·구'] || extractSigunguFromName(row['수행기관명']) || undefined,
             specialization: row['추가정보(특화)'] || undefined,
             middleManager: row['추가정보(중간관리자)'] || undefined,
             topManager: row['추가정보(최고관리자)'] || undefined,
@@ -972,8 +1067,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             year: row['년도/차수'] || row['년도차수'] || row['년도'] || row['차수'] || undefined,
             applicationDate: parseDate(row['교육신청일자'])?.toISOString() || undefined,
             institutionType: row['수행기관명유형'] || undefined,
-            region: row['시도'] || undefined,
-            district: row['시군구'] || undefined,
+            region: row['시도'] || row['광역시'] || row['광역명'] || row['시·도'] || extractSidoFromName(row['수행기관명']) || undefined,
+            district: row['시군구'] || row['지자체'] || row['시·군·구'] || extractSigunguFromName(row['수행기관명']) || undefined,
             specialization: row['추가정보(특화)'] || undefined,
             middleManager: row['추가정보(중간관리자)'] || undefined,
             topManager: row['추가정보(최고관리자)'] || undefined,

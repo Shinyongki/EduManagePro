@@ -123,12 +123,58 @@ export const isActiveEmployee = (
 };
 
 /**
- * 2. 표준 중복 제거 함수
- * 일관된 중복 제거 기준 적용
+ * 생년월일 정규화 함수
+ * 다양한 형태의 생년월일을 표준 형태로 변환
+ */
+const normalizeBirthDate = (birthDate: any): string | null => {
+  if (!birthDate) return null;
+  
+  const dateStr = birthDate.toString().trim();
+  if (!dateStr || dateStr === '-' || dateStr === 'undefined' || dateStr === 'null') return null;
+  
+  // 숫자만 추출 (YYYYMMDD 형태로 정규화)
+  const numbersOnly = dateStr.replace(/[^0-9]/g, '');
+  
+  // 8자리 숫자인지 확인
+  if (numbersOnly.length === 8) {
+    const year = parseInt(numbersOnly.substring(0, 4));
+    const month = parseInt(numbersOnly.substring(4, 6));
+    const day = parseInt(numbersOnly.substring(6, 8));
+    
+    // 유효한 날짜인지 검증
+    if (year >= 1900 && year <= 2030 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return numbersOnly;
+    }
+  }
+  
+  // 6자리 숫자인 경우 (YYMMDD → YYYYMMDD)
+  if (numbersOnly.length === 6) {
+    const year = parseInt(numbersOnly.substring(0, 2));
+    const fullYear = year >= 30 ? 1900 + year : 2000 + year; // 30 이상이면 19xx, 미만이면 20xx
+    const month = parseInt(numbersOnly.substring(2, 4));
+    const day = parseInt(numbersOnly.substring(4, 6));
+    
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${fullYear}${numbersOnly.substring(2)}`;
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * 2. 표준 중복 제거 함수 (개선된 버전)
+ * 이름+생년월일 조합을 우선으로 하는 엄격한 중복 제거
  */
 export const getUniquePersons = <T extends any>(persons: T[]): T[] => {
   const uniqueMap = new Map<string, T>();
-  const debugCounts = { processed: 0, skipped: 0, duplicates: 0 };
+  const debugCounts = { 
+    processed: 0, 
+    skipped: 0, 
+    duplicates: 0,
+    nameOnlyMatches: 0, // 이름만 일치하는 경우 (동명이인 가능성)
+    exactMatches: 0     // 이름+생년월일 정확 일치
+  };
   
   persons.forEach(person => {
     debugCounts.processed++;
@@ -139,36 +185,55 @@ export const getUniquePersons = <T extends any>(persons: T[]): T[] => {
       return;
     }
     
-    // 여러 매칭 키를 시도해서 중복 제거 강화
-    const possibleKeys = [];
+    const name = person.name.trim();
+    const normalizedBirthDate = normalizeBirthDate(person.birthDate);
     
-    // 1순위: 이름 + 생년월일 (가장 정확한 매칭)
-    if (person.name && person.birthDate) {
-      // 생년월일 정규화 (여러 형태 지원)
-      const normalizedBirthDate = person.birthDate.toString().replace(/[-\.\/]/g, '');
-      possibleKeys.push(`${person.name.trim()}_${normalizedBirthDate}`);
+    // 매칭 키 생성 (우선순위별)
+    const matchingKeys = [];
+    
+    // 1순위: 이름 + 생년월일 (가장 신뢰할 수 있는 매칭)
+    if (normalizedBirthDate) {
+      matchingKeys.push({
+        key: `${name}_${normalizedBirthDate}`,
+        type: 'exact',
+        priority: 1
+      });
     }
     
-    // 2순위: 이름 + ID
-    if (person.name && person.id) {
-      possibleKeys.push(`${person.name.trim()}_${person.id}`);
+    // 2순위: 이름 + ID (생년월일이 없는 경우)
+    if (person.id && person.id.toString().trim() !== '') {
+      matchingKeys.push({
+        key: `${name}_ID_${person.id}`,
+        type: 'id_based',
+        priority: 2
+      });
     }
     
-    // 3순위: 이름만 (가장 약한 매칭)
-    if (person.name) {
-      possibleKeys.push(person.name.trim());
+    // 매칭 키가 없으면 이름으로만 임시 키 생성 (경고와 함께)
+    if (matchingKeys.length === 0) {
+      matchingKeys.push({
+        key: `${name}_NAME_ONLY`,
+        type: 'name_only',
+        priority: 3
+      });
     }
     
-    // 가장 강력한 매칭 키부터 확인
-    let foundExisting = false;
-    let chosenKey = possibleKeys[0] || person.name.trim();
+    // 가장 높은 우선순위 키부터 확인
+    let foundMatch = false;
     
-    for (const key of possibleKeys) {
+    for (const { key, type, priority } of matchingKeys) {
       const existing = uniqueMap.get(key);
+      
       if (existing) {
         debugCounts.duplicates++;
-        foundExisting = true;
-        chosenKey = key;
+        foundMatch = true;
+        
+        if (type === 'exact') {
+          debugCounts.exactMatches++;
+        } else if (type === 'name_only') {
+          debugCounts.nameOnlyMatches++;
+          console.warn(`⚠️ 동명이인 가능성: ${name} (생년월일 정보 없음)`);
+        }
         
         // 중복된 경우 더 완전한 데이터를 선택
         const currentScore = getDataCompletenessScore(person);
@@ -176,20 +241,33 @@ export const getUniquePersons = <T extends any>(persons: T[]): T[] => {
         
         if (currentScore > existingScore) {
           uniqueMap.set(key, person);
-          console.log(`🔄 중복 데이터 교체: ${person.name} (점수 ${currentScore} > ${existingScore})`);
+          console.log(`🔄 중복 데이터 교체: ${name} (${type}, 점수 ${currentScore} > ${existingScore})`);
+        } else {
+          console.log(`🔄 기존 데이터 유지: ${name} (${type}, 점수 ${existingScore} >= ${currentScore})`);
         }
         break;
       }
     }
     
-    // 중복이 발견되지 않으면 새로 추가
-    if (!foundExisting) {
-      uniqueMap.set(chosenKey, person);
+    // 중복이 발견되지 않으면 새로 추가 (가장 높은 우선순위 키로)
+    if (!foundMatch) {
+      const bestKey = matchingKeys[0];
+      uniqueMap.set(bestKey.key, person);
+      
+      if (bestKey.type === 'name_only') {
+        console.warn(`⚠️ 이름만으로 등록: ${name} (생년월일, ID 정보 없음)`);
+      }
     }
   });
   
   const result = Array.from(uniqueMap.values());
-  console.log(`🧹 중복 제거 완료: ${debugCounts.processed}개 처리 → ${result.length}개 유지 (${debugCounts.duplicates}개 중복 발견, ${debugCounts.skipped}개 스킵)`);
+  console.log(`🧹 개선된 중복 제거 완료:`);
+  console.log(`  - 처리: ${debugCounts.processed}개`);
+  console.log(`  - 유지: ${result.length}개`);
+  console.log(`  - 중복 제거: ${debugCounts.duplicates}개`);
+  console.log(`  - 정확 매칭(이름+생년월일): ${debugCounts.exactMatches}개`);
+  console.log(`  - 이름만 매칭(동명이인 위험): ${debugCounts.nameOnlyMatches}개`);
+  console.log(`  - 스킵: ${debugCounts.skipped}개`);
   
   return result;
 };
@@ -453,21 +531,53 @@ export const createParticipantBasedStats = (
 
   // 교육 이수 정보 매칭
   const participantWithEducation = activeParticipants.map(participant => {
-    // 교육 데이터에서 매칭
-    const basicEducation = safeBasicEducationData.find(b => 
-      (b.name === participant.name && b.birthDate === participant.birthDate) ||
-      (b.name === participant.name && b.id === participant.id)
-    );
+    // 교육 데이터에서 매칭 (더 유연한 매칭 로직)
+    const basicEducation = safeBasicEducationData.find(b => {
+      // 1차: 이름 + ID 매칭 (가장 확실한 방법)
+      if (b.name === participant.name && b.id === participant.id && b.id && participant.id) return true;
+      // 2차: 이름 + 생년월일 완전 매칭 (생년월일이 있는 경우)
+      if (b.name === participant.name && b.birthDate === participant.birthDate && b.birthDate && participant.birthDate) return true;
+      // 3차: 이름 + 기관 매칭 (생년월일이 없는 경우 사용)
+      if (b.name === participant.name && b.institution && participant.institution && 
+          b.institution.replace(/\s+/g, '') === participant.institution.replace(/\s+/g, '')) return true;
+      return false;
+    });
     
-    const advancedEducation = safeAdvancedEducationData.find(a => 
-      (a.name === participant.name && a.birthDate === participant.birthDate) ||
-      (a.name === participant.name && a.id === participant.id)
-    );
+    const advancedEducation = safeAdvancedEducationData.find(a => {
+      // 1차: 이름 + ID 매칭 (가장 확실한 방법)
+      if (a.name === participant.name && a.id === participant.id && a.id && participant.id) return true;
+      // 2차: 이름 + 생년월일 완전 매칭 (생년월일이 있는 경우)
+      if (a.name === participant.name && a.birthDate === participant.birthDate && a.birthDate && participant.birthDate) return true;
+      // 3차: 이름 + 기관 매칭 (생년월일이 없는 경우 사용)
+      if (a.name === participant.name && a.institution && participant.institution && 
+          a.institution.replace(/\s+/g, '') === participant.institution.replace(/\s+/g, '')) return true;
+      return false;
+    });
     
+    // 최종 수료 상태 계산
+    const basicCompleted = basicEducation?.status === '수료' || 
+                          basicEducation?.status === '완료' || 
+                          participant.basicTraining === '수료' ||
+                          participant.basicTraining === '완료';
+    const advancedCompleted = advancedEducation?.status === '수료' || 
+                             advancedEducation?.status === '완료' ||
+                             participant.advancedEducation === '수료' ||
+                             participant.advancedEducation === '완료';
+    
+    let finalCompletion = 'none';
+    if (basicCompleted && advancedCompleted) {
+      finalCompletion = 'complete';
+    } else if (basicCompleted || advancedCompleted) {
+      finalCompletion = 'partial';
+    } else if (basicEducation || advancedEducation || participant.basicTraining || participant.advancedEducation) {
+      finalCompletion = 'in_progress';
+    }
+
     return {
       ...participant,
       basicEducationStatus: basicEducation?.status || participant.basicTraining,
       advancedEducationStatus: advancedEducation?.status || participant.advancedEducation,
+      finalCompletion: finalCompletion,
       source: 'participant',
       isActive: true // 이미 필터링됨
     };

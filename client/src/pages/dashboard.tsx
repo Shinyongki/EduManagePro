@@ -32,6 +32,7 @@ import { IntegratedDataAnalyzer } from "@/utils/integrated-analysis";
 import { DataMigration } from "@/components/migration/data-migration";
 import { snapshotManager } from "@/lib/snapshot-manager";
 import { createUnifiedDataSource, calculateEducationStats, getActivePersons } from "@/utils/unified-data-source";
+import { runInstitutionMatcherTests } from "@/utils/institution-matcher.test";
 
 interface EducationStatistics {
   totalParticipants: number;
@@ -85,6 +86,12 @@ export default function Dashboard() {
   // 종사자 데이터 자동 로딩
   React.useEffect(() => {
     loadEmployeeData();
+    
+    // 개발 모드에서 기관 매칭 테스트 실행
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🧪 기관 매칭 테스트 실행...');
+      runInstitutionMatcherTests();
+    }
   }, [loadEmployeeData]);
 
   // Clear mock data on mount
