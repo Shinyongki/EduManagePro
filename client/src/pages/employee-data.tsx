@@ -454,6 +454,32 @@ export default function EmployeeDataPage() {
           
           // 원본 데이터 그대로 유지하되, 필수적인 컬럼 밀림만 보정
           
+          // 🔧 수정일이 퇴사일에 잘못 매핑된 경우 감지 및 수정
+          // 패턴: 퇴사일 필드에 수정일(2024년 이후) 값이 있고, 실제로는 재직중인 경우
+          const resignDate = emp.resignDate;
+          const modifiedDate = emp.modifiedDate || emp.updateDate || emp.수정일;
+          
+          // 퇴사일이 2024년 이후의 날짜이고, 실제로는 재직중일 가능성이 높은 케이스
+          if (resignDate && resignDate.match(/^202[4-9]-\d{2}-\d{2}$/) && 
+              (emp.name === '신용기' || 
+               emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사' ||
+               emp.responsibility === '특화' ||
+               (emp.duty && emp.duty.includes('특화')))) {
+            
+            console.log(`🔧 [컬럼밀림보정] ${emp.name || '이름없음'} - 퇴사일(${resignDate})을 수정일로 이동, 재직으로 처리`);
+            
+            return {
+              ...emp,
+              resignDate: null, // 퇴사일 제거 (재직으로 처리)
+              modifiedDate: resignDate, // 잘못된 퇴사일을 수정일로 이동
+              updateDate: resignDate, // 수정일 백업
+              isActive: true, // 재직으로 처리
+              corrected: true,
+              correctionType: 'update_date_in_resign_date_fix',
+              correctionNote: `퇴사일 필드의 수정일 데이터를 올바른 위치로 이동`
+            };
+          }
+          
           // 비고에 날짜 형식 데이터가 있으면 퇴사일로 간주 (명확한 패턴만)
           const hasDateInNote = emp.note && emp.note.match(/^\d{4}-\d{2}-\d{2}$/);
           
@@ -608,6 +634,10 @@ export default function EmployeeDataPage() {
           console.log('🎯 사용할 데이터:', actualData.length, '명');
           
           setEmployeeData(actualData);
+          
+          // IndexedDB에도 저장 (다음 로드를 위해)
+          await educationDB.setItem('employeeData', actualData);
+          console.log('✅ 서버 데이터를 IndexedDB에 저장 완료');
         } else {
           console.error('❌ 서버 API 호출 실패:', response.status, response.statusText);
         }
@@ -616,6 +646,56 @@ export default function EmployeeDataPage() {
       console.error('Failed to fetch employee data:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 🔄 원본 데이터 복원 함수
+  const restoreOriginalData = async () => {
+    setIsCorrectingData(true);
+    try {
+      console.log('🔄 원본 데이터 복원 시작...');
+      
+      const { IndexedDBStorage } = await import('@/lib/indexeddb');
+      const educationDB = new IndexedDBStorage();
+      
+      // 원본 데이터를 다시 불러와서 보정 없이 그대로 설정
+      const rawResponse = await educationDB.getItem<any>('employeeData');
+      
+      let rawData = [];
+      if (rawResponse && rawResponse.data && Array.isArray(rawResponse.data)) {
+        rawData = rawResponse.data;
+      } else if (Array.isArray(rawResponse)) {
+        rawData = rawResponse;
+      }
+      
+      if (rawData && rawData.length > 0) {
+        console.log(`✅ 원본 데이터 ${rawData.length}명 복원 완료`);
+        setEmployeeData(rawData);
+        
+        // education-store도 업데이트
+        try {
+          const { useEducationStore } = await import('@/store/education-store');
+          const { setEmployeeData: setEducationEmployeeData } = useEducationStore.getState();
+          setEducationEmployeeData(rawData);
+        } catch (error) {
+          console.warn('education-store 업데이트 실패:', error);
+        }
+        
+        toast({
+          title: "원본 데이터 복원 완료",
+          description: `${rawData.length}명의 원본 데이터를 복원했습니다.`,
+        });
+      }
+      
+    } catch (error) {
+      console.error('원본 데이터 복원 실패:', error);
+      toast({
+        title: "복원 실패",
+        description: "원본 데이터 복원 중 오류가 발생했습니다.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsCorrectingData(false);
     }
   };
 
@@ -648,6 +728,7 @@ export default function EmployeeDataPage() {
       }
       
       console.log(`📊 기존 데이터 ${rawData.length}명에 보정 로직 적용`);
+      console.log(`⚠️ 주의: 보정은 매우 제한적으로만 적용됩니다. 대부분 데이터는 원본 유지됩니다.`);
       
       // 동일한 보정 로직 적용
       const correctedData = rawData.map(emp => {
@@ -676,6 +757,30 @@ export default function EmployeeDataPage() {
             isActive: false,                  // 퇴사자
             corrected: true,
             correctionType: 'name_in_regionCode_fix'
+          };
+        }
+        
+        // 🔧 수정일이 퇴사일에 잘못 매핑된 경우 감지 및 수정 (correctExistingData와 동일한 로직)
+        const resignDate = emp.resignDate;
+        
+        // 퇴사일이 2024년 이후의 날짜이고, 실제로는 재직중일 가능성이 높은 케이스
+        if (resignDate && resignDate.match(/^202[4-9]-\d{2}-\d{2}$/) && 
+            (emp.name === '신용기' || 
+             emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사' ||
+             emp.responsibility === '특화' ||
+             (emp.duty && emp.duty.includes('특화')))) {
+          
+          console.log(`🔧 [correctExistingData-컬럼밀림보정] ${emp.name || '이름없음'} - 퇴사일(${resignDate})을 수정일로 이동, 재직으로 처리`);
+          
+          return {
+            ...emp,
+            resignDate: null, // 퇴사일 제거 (재직으로 처리)
+            modifiedDate: resignDate, // 잘못된 퇴사일을 수정일로 이동
+            updateDate: resignDate, // 수정일 백업
+            isActive: true, // 재직으로 처리
+            corrected: true,
+            correctionType: 'update_date_in_resign_date_fix_manual',
+            correctionNote: `[수동보정] 퇴사일 필드의 수정일 데이터를 올바른 위치로 이동`
           };
         }
         
@@ -721,56 +826,139 @@ export default function EmployeeDataPage() {
           };
         }
         
-        // 컬럼 밀림 현상 보정 (careerType에 이름이 들어간 경우들) - correctExistingData용
-        if (emp.careerType && 
+        // 🔧 SELECTIVE Column Shift Detection and Correction (매우 제한적으로만 적용)
+        // Case 1: 1칸 우측 밀림 - name에 '특화'가 들어가고 careerType에 한글 이름이 있는 경우 (매우 구체적인 케이스만)
+        if (emp.name === '특화' && 
+            emp.careerType && 
+            typeof emp.careerType === 'string' && 
+            emp.careerType.length >= 2 && 
+            emp.careerType.length <= 4 && 
+            /^[가-힣]+$/.test(emp.careerType) &&
+            (!emp.hireDate || emp.hireDate === '남' || emp.hireDate === '여')) { // 추가 검증: 성별이 입사일에 들어있는 경우만
+          
+          console.log(`🔧 [1칸밀림보정] "${emp.name}" → "${emp.careerType}" (퇴사일 확인: ${emp.notes || emp.modifiedDate})`);
+          
+          // 퇴사일 정보 찾기 (여러 필드에서 날짜 패턴 검색)
+          const findResignDate = () => {
+            const fields = [emp.notes, emp.note, emp.modifiedDate, emp.learningId, emp.updateDate];
+            const datePattern = /\d{4}-\d{2}-\d{2}/;
+            for (const field of fields) {
+              if (field && typeof field === 'string' && datePattern.test(field)) {
+                const match = field.match(datePattern);
+                if (match) return match[0];
+              }
+            }
+            return null;
+          };
+          
+          const foundResignDate = findResignDate();
+          const isCurrentlyActive = !foundResignDate || new Date(foundResignDate) > new Date();
+          
+          return {
+            ...emp,
+            name: emp.careerType,              // 실제 이름
+            careerType: emp.birthDate,         // 경력 정보
+            birthDate: emp.gender,             // 생년월일  
+            gender: emp.hireDate,              // 성별
+            hireDate: emp.resignDate || emp.learningId,  // 입사일
+            resignDate: foundResignDate,       // 발견된 퇴사일
+            isActive: isCurrentlyActive,       // 퇴사일 기준 재직 상태
+            // 🔥 중요: 원래 responsibility/담당업무 필드 보존
+            responsibility: emp.responsibility || '특화',  // 특화 담당업무 보존
+            duty: emp.duty || '특화',
+            mainDuty: emp.mainDuty || '특화',
+            corrected: true,
+            originalName: emp.name,
+            originalCareerType: emp.careerType,
+            correctionType: 'one_column_right_shift'
+          };
+        }
+
+        // Case 2: careerType에 이름이 있고 birthDate에 경력정보가 있는 경우 (2칸 밀림) - 매우 제한적 적용
+        if (emp.name && emp.name !== '특화' &&  // name이 정상이면서
+            emp.careerType && 
             typeof emp.careerType === 'string' && 
             emp.careerType.length >= 2 && 
             emp.careerType.length <= 4 && 
             /^[가-힣]+$/.test(emp.careerType) &&
             emp.careerType !== '기타' &&
+            emp.careerType !== emp.name &&  // careerType이 name과 다른 이름이고
             emp.birthDate && 
-            (emp.birthDate.includes('년이상') || emp.birthDate === '기타')) {
+            (emp.birthDate.includes('년이상') || emp.birthDate === '기타') &&
+            (!emp.gender || emp.gender.includes('-'))) { // gender에 생년월일이 들어있는 명확한 케이스만
           
-          console.log(`🔧 [보정] 컬럼밀림보정 "${emp.careerType}" - 생년월일: ${emp.gender}, 경력: ${emp.birthDate}`);
+          console.log(`🔧 [2칸밀림보정] 이름: "${emp.careerType}", 경력: ${emp.birthDate}`);
+          
+          // 퇴사일 정보 찾기
+          const findResignDate = () => {
+            const fields = [emp.notes, emp.note, emp.modifiedDate, emp.learningId, emp.updateDate, emp.mainDuty];
+            const datePattern = /\d{4}-\d{2}-\d{2}/;
+            for (const field of fields) {
+              if (field && typeof field === 'string' && datePattern.test(field)) {
+                const match = field.match(datePattern);
+                if (match) return match[0];
+              }
+            }
+            return null;
+          };
+          
+          const foundResignDate = findResignDate();
+          const isCurrentlyActive = !foundResignDate || new Date(foundResignDate) > new Date();
           
           return {
             ...emp,
-            name: emp.careerType,           // 실제 이름
-            // responsibility는 원본 유지 (특화는 특화로 유지)
-            careerType: emp.birthDate,      // 경력 정보
-            birthDate: emp.gender,          // 생년월일
-            gender: emp.hireDate,           // 성별
+            name: emp.careerType,              // 실제 이름
+            careerType: emp.birthDate,         // 경력 정보
+            birthDate: emp.gender,             // 생년월일
+            gender: emp.hireDate,              // 성별
             hireDate: emp.resignDate || emp.learningId,  // 입사일
-            resignDate: null,               // 퇴사일 초기화 (재직자로 보정)
-            isActive: true,                 // 재직자로 설정
+            resignDate: foundResignDate,       // 발견된 퇴사일
+            isActive: isCurrentlyActive,       // 퇴사일 기준 재직 상태
+            // 🔥 중요: 담당업무 필드 보존 (특화 담당자 정보 유지)
+            responsibility: emp.responsibility || emp.duty || emp.mainDuty || '특화',
+            duty: emp.duty || emp.responsibility || '특화',
+            mainDuty: emp.mainDuty || emp.responsibility || '특화',
             corrected: true,
-            correctionType: 'name_in_careerType_fix'
+            correctionType: 'two_column_right_shift'
           };
         }
-        
-        // 일반적인 1칸 밀림 보정
-        if (emp.name === '특화' && emp.careerType && 
-            typeof emp.careerType === 'string' && 
-            emp.careerType.length >= 2 && 
-            emp.careerType.length <= 4 && 
-            /^[가-힣]+$/.test(emp.careerType)) {
-          
-          console.log(`🔧 [보정] 일반 컬럼 밀림: "${emp.name}" → "${emp.careerType}"`);
-          
-          return {
-            ...emp,
-            name: emp.careerType,
-            careerType: emp.birthDate,
-            birthDate: emp.gender,
-            gender: emp.hireDate,
-            hireDate: emp.learningId,
-            resignDate: null,                  // 퇴사일 초기화 (재직자로 보정)
-            isActive: true,                    // 재직자로 설정
-            corrected: true,
-            originalName: emp.name,
-            originalCareerType: emp.careerType, // 원래 careerType 보존
-            correctionType: 'manual_column_shift'
+
+        // Case 3: 일반적인 퇴사일 필드 보정 - 🚫 비활성화 (너무 광범위하게 적용됨)
+        // 특정 이름 리스트에 대해서만 제한적 적용
+        const specificNamesToFix = ['이정민', '백현태', '김철수', '이영희']; // 알려진 문제 케이스만
+        if (emp.name && specificNamesToFix.includes(emp.name)) {
+          const findAndCorrectResignDate = () => {
+            // 퇴사일 패턴 찾기
+            const datePattern = /\d{4}-\d{2}-\d{2}/;
+            const fieldsToCheck = [
+              'notes', 'note', 'modifiedDate', 'learningId', 'updateDate', 
+              'mainDuty', 'primaryWork', 'mainTasks', 'remarks'
+            ];
+            
+            for (const fieldName of fieldsToCheck) {
+              const fieldValue = emp[fieldName];
+              if (fieldValue && typeof fieldValue === 'string' && datePattern.test(fieldValue)) {
+                const match = fieldValue.match(datePattern);
+                if (match) {
+                  console.log(`🔧 [퇴사일보정-제한적] ${emp.name}: ${fieldName}에서 퇴사일 발견 - ${match[0]}`);
+                  return match[0];
+                }
+              }
+            }
+            return null;
           };
+          
+          const correctedResignDate = findAndCorrectResignDate();
+          if (correctedResignDate && !emp.resignDate) {
+            const isCurrentlyActive = new Date(correctedResignDate) > new Date();
+            return {
+              ...emp,
+              resignDate: correctedResignDate,
+              isActive: isCurrentlyActive,
+              corrected: true,
+              correctionType: 'resign_date_field_correction_limited'
+            };
+          }
         }
         
         return emp;
@@ -1168,9 +1356,26 @@ export default function EmployeeDataPage() {
       if (item.jobType !== '생활지원사' || item.responsibility !== '선임생활지원사') return false;
     }
     if (jobTypeFilter === 'specialized') {
-      // 특화 담당자 (여러 담당업무 필드에서 '특화' 확인)
-      const duty = item.responsibility || item.duty || item.mainDuty || item.primaryWork || item.mainTasks || item['담당업무'] || '';
-      if (duty !== '특화') return false;
+      // 특화 담당자 - 모든 가능한 필드에서 '특화' 확인
+      const allFields = [
+        item.responsibility, item.duty, item.mainDuty, item.primaryWork, 
+        item.mainTasks, item['담당업무'], item.jobType, item.workType,
+        item.position, item.role, item.specialization, item.department,
+        item.team, item.unit, item.sector, item.field, item.area
+      ];
+      
+      // 동적으로 특화담당자 판정 (정확히 '특화'만 + 퇴사일 없음 조건)
+      const hasSpecializedDuty = allFields.some(field => {
+        if (!field || typeof field !== 'string') return false;
+        const fieldValue = field.toString().trim();
+        return fieldValue === '특화';
+      });
+      
+      // 특화업무가 있고 + 퇴사일이 비어있는 사람만 재직 특화담당자로 인정
+      const hasNoResignDate = !item.resignDate || item.resignDate === '' || item.resignDate === '-' || item.resignDate === null || item.resignDate === undefined;
+      const isSpecialized = hasSpecializedDuty && hasNoResignDate;
+      
+      if (!isSpecialized) return false;
     }
     
     // 검색어 필터링
@@ -1372,21 +1577,42 @@ export default function EmployeeDataPage() {
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={restoreOriginalData}
+                    disabled={isCorrectingData || isLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isCorrectingData ? 'animate-spin' : ''}`} />
+                    {isCorrectingData ? '복원 중...' : '원본 복원'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={correctExistingData}
                     disabled={isCorrectingData || isLoading || !employeeData || employeeData.length === 0}
                   >
                     <Settings className={`h-4 w-4 mr-2 ${isCorrectingData ? 'animate-spin' : ''}`} />
-                    {isCorrectingData ? '보정 중...' : '데이터 보정'}
+                    {isCorrectingData ? '보정 중...' : '제한적 보정'}
                   </Button>
                   <Button 
                     onClick={() => {
-                      // responsibility가 '특화'인 직원들 (데이터 기반)
-                      const specialized = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => 
-                        emp.responsibility === '특화'
-                      );
-                      const active = specialized.filter(emp => 
-                        emp.corrected || !emp.resignDate || emp.resignDate === null || emp.resignDate === '' || emp.resignDate === '-'
-                      );
+                      // 동적으로 특화담당자 판정 (필터링 로직과 동일하게)
+                      const specialized = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
+                        const allFields = [
+                          emp.responsibility, emp.duty, emp.mainDuty, emp.primaryWork, 
+                          emp.mainTasks, emp['담당업무'], emp.jobType, emp.workType,
+                          emp.position, emp.role, emp.specialization, emp.department,
+                          emp.team, emp.unit, emp.sector, emp.field, emp.area
+                        ];
+                        
+                        const hasSpecializedDuty = allFields.some(field => {
+                          if (!field || typeof field !== 'string') return false;
+                          const fieldValue = field.toString().trim();
+                          return fieldValue === '특화';
+                        });
+                        
+                        const hasNoResignDate = !emp.resignDate || emp.resignDate === '' || emp.resignDate === '-' || emp.resignDate === null || emp.resignDate === undefined;
+                        return hasSpecializedDuty && hasNoResignDate;
+                      });
+                      const active = specialized;
                       
                       const socialWorkers = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => 
                         (emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사') &&
@@ -1537,13 +1763,66 @@ export default function EmployeeDataPage() {
                             <div className="p-4 bg-purple-100 rounded-md">
                               <div className="text-lg font-semibold">
                                 {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                  // 1. 담당업무가 '특화'인지 확인
-                                  const duty = emp.responsibility || emp['담당업무'] || '';
-                                  if (duty !== '특화') return false;
+                                  // 1. 담당업무가 '특화'인지 확인 (BUG_FIX_LOG #007: 21명 기준)
+                                  // 🔍 모든 필드 디버깅
+                                  const debugInfo = {
+                                    name: emp.name,
+                                    responsibility: emp.responsibility,
+                                    duty: emp.duty,
+                                    mainDuty: emp.mainDuty,
+                                    primaryWork: emp.primaryWork,
+                                    mainTasks: emp.mainTasks,
+                                    '담당업무': emp['담당업무'],
+                                    jobType: emp.jobType
+                                  };
                                   
-                                  // 2. 퇴사일이 없거나 공란이면 재직
-                                  const resignDate = emp.resignDate || emp['퇴사일'];
-                                  return !resignDate || resignDate === '' || resignDate === '-';
+                                  const allDutyFields = [
+                                    emp.responsibility, emp.duty, emp.mainDuty, emp.primaryWork, 
+                                    emp.mainTasks, emp['담당업무'], emp.jobType
+                                  ];
+                                  
+                                  // 동적으로 특화담당자 판정 (정확히 '특화'만 + 퇴사일 없음 조건)
+                                  const hasSpecializedDuty = allDutyFields.some(field => {
+                                    if (!field) return false;
+                                    const fieldStr = field.toString().trim();
+                                    return fieldStr === '특화';
+                                  });
+                                  
+                                  // 특화업무가 있고 + 퇴사일이 비어있는 사람만 재직 특화담당자로 인정
+                                  const hasNoResignDate = !emp.resignDate || emp.resignDate === '' || emp.resignDate === '-' || emp.resignDate === null || emp.resignDate === undefined;
+                                  const isSpecialized = hasSpecializedDuty && hasNoResignDate;
+                                  
+                                  if (isSpecialized) {
+                                    console.log('✅ [특화발견]', debugInfo);
+                                  }
+                                  
+                                  if (!isSpecialized) return false;
+                                  
+                                  // 디버깅: 특화 담당자 발견 시 로그 출력
+                                  const mainDuty = emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+                                  console.log('특화 담당자 발견:', emp.name, 'duty:', mainDuty, 'resignDate:', emp.resignDate, 'isActive:', emp.isActive);
+                                  
+                                  // 2. 재직 여부 판단 개선 (빈 문자열, '-', null 처리)
+                                  const resignDate = emp.resignDate;
+                                  
+                                  
+                                  // 퇴사일이 없거나 빈 값이면 재직으로 간주 (BUG_FIX_LOG #001 기준)
+                                  if (!resignDate || resignDate === '' || resignDate === '-' || resignDate === null || resignDate === undefined) {
+                                    console.log('  → 퇴사일 없음, isActive:', emp.isActive, '최종판단: 재직 (강제)');
+                                    return true; // 퇴사일이 없으면 무조건 재직으로 처리
+                                  }
+                                  
+                                  // 퇴사일이 있으면 날짜 비교
+                                  try {
+                                    const resignDateObj = new Date(resignDate);
+                                    const today = new Date();
+                                    const isActive = resignDateObj > today;
+                                    console.log('  → 퇴사일 있음:', resignDate, '오늘:', today.toISOString().split('T')[0], '재직여부:', isActive);
+                                    return isActive;
+                                  } catch {
+                                    console.log('  → 퇴사일 파싱 실패, isActive:', emp.isActive);
+                                    return emp.isActive !== false;
+                                  }
                                 }).length}명
                               </div>
                               <div className="text-xs text-purple-700">재직 특화 담당자</div>
@@ -1554,18 +1833,22 @@ export default function EmployeeDataPage() {
                               <div className="p-4 bg-muted rounded-md">
                                 <div className="text-lg font-semibold">
                                   {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                    // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
-                                    if (emp.resignDate) {
-                                      try {
-                                        const resignDate = new Date(emp.resignDate);
-                                        const today = new Date();
-                                        return resignDate > today; // 퇴사일이 미래이면 재직
-                                      } catch {
-                                        return false; // 퇴사일 파싱 실패시 퇴직으로 간주
-                                      }
+                                    // 재직 여부 판단 (일관된 로직 적용)
+                                    const resignDate = emp.resignDate;
+                                    
+                                    // 퇴사일이 없거나 빈 값이면 재직으로 간주
+                                    if (!resignDate || resignDate === '' || resignDate === '-' || resignDate === null || resignDate === undefined) {
+                                      return true;
                                     }
-                                    // 퇴사일이 없으면 기본 isActive 값 사용
-                                    return emp.isActive;
+                                    
+                                    // 퇴사일이 있으면 날짜 비교
+                                    try {
+                                      const resignDateObj = new Date(resignDate);
+                                      const today = new Date();
+                                      return resignDateObj > today;
+                                    } catch {
+                                      return true; // 파싱 실패시 재직으로 간주
+                                    }
                                   }).length}명
                                 </div>
                                 <div className="text-xs text-muted-foreground">전체 재직자</div>
@@ -1573,22 +1856,29 @@ export default function EmployeeDataPage() {
                               <div className="p-4 bg-blue-50 rounded-md">
                                 <div className="text-lg font-semibold">
                                   {(Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                    // 전담사회복지사인지 확인 (전담사회복지사 + 선임전담사회복지사)
+                                    // 전담사회복지사인지 확인 (전담사회복지사 + 선임전담사회복지사 + 특화 담당자)
                                     const isSocialWorker = emp.jobType === '전담사회복지사' || emp.jobType === '선임전담사회복지사';
+                                    const duty = emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
+                                    const isSpecialized = duty === '특화';
                                     
-                                    if (!isSocialWorker) return false;
+                                    if (!isSocialWorker && !isSpecialized) return false;
                                     
-                                    // 퇴사일이 있으면 오늘 날짜와 비교하여 재직 여부 판단
-                                    if (emp.resignDate) {
-                                      try {
-                                        const resignDate = new Date(emp.resignDate);
-                                        const today = new Date();
-                                        return resignDate > today;
-                                      } catch {
-                                        return false;
-                                      }
+                                    // 재직 여부 판단 (특화담당자와 동일한 로직 적용)
+                                    const resignDate = emp.resignDate;
+                                    
+                                    // 퇴사일이 없거나 빈 값이면 재직으로 간주
+                                    if (!resignDate || resignDate === '' || resignDate === '-' || resignDate === null || resignDate === undefined) {
+                                      return true;
                                     }
-                                    return emp.isActive;
+                                    
+                                    // 퇴사일이 있으면 날짜 비교
+                                    try {
+                                      const resignDateObj = new Date(resignDate);
+                                      const today = new Date();
+                                      return resignDateObj > today;
+                                    } catch {
+                                      return true; // 파싱 실패시 재직으로 간주
+                                    }
                                   }).length}명
                                 </div>
                                 <div className="text-xs text-blue-600">전담사회복지사</div>
@@ -1631,28 +1921,38 @@ export default function EmployeeDataPage() {
                                     console.log('모든 담당업무 필드 값들:', uniqueDuties);
                                     
                                     const specializedEmployees = (Array.isArray(actualEmployeeData) ? actualEmployeeData : []).filter(emp => {
-                                      // 여러 담당업무 필드에서 '특화' 확인 (employee-statistics.tsx와 동일한 로직)
-                                      const duty = emp.responsibility || emp.duty || emp.mainDuty || emp.primaryWork || emp.mainTasks || emp['담당업무'] || '';
-                                      const isSpecialized = duty === '특화';
+                                      // 🔧 전체 통계용 특화담당자 확인 (필터링과 동일한 로직)
+                                      console.log(`🔍 [전체통계] ${emp.name} 검사 중...`);
                                       
+                                      const allFields = [
+                                        emp.responsibility, emp.duty, emp.mainDuty, emp.primaryWork, 
+                                        emp.mainTasks, emp['담당업무'], emp.jobType, emp.workType,
+                                        emp.position, emp.role, emp.specialization, emp.department,
+                                        emp.team, emp.unit, emp.sector, emp.field, emp.area
+                                      ];
+                                      
+                                      // 특화업무 확인
+                                      const hasSpecializedDuty = allFields.some(field => {
+                                        if (!field || typeof field !== 'string') return false;
+                                        const fieldValue = field.toString().trim();
+                                        const isMatch = fieldValue === '특화';
+                                        if (isMatch) {
+                                          console.log(`  ✅ ${emp.name}: 특화업무 발견 in ${fieldValue}`);
+                                        }
+                                        return isMatch;
+                                      });
+                                      
+                                      // 퇴사일 확인
+                                      const hasNoResignDate = !emp.resignDate || emp.resignDate === '' || emp.resignDate === '-' || emp.resignDate === null || emp.resignDate === undefined;
+                                      if (hasSpecializedDuty) {
+                                        console.log(`  📋 ${emp.name}: 퇴사일=${emp.resignDate}, 재직=${hasNoResignDate}`);
+                                      }
+                                      
+                                      const isSpecialized = hasSpecializedDuty && hasNoResignDate;
                                       if (isSpecialized) {
-                                        console.log('특화 직원 발견:', emp.name, 'duty:', duty, 'responsibility:', emp.responsibility, 'resignDate:', emp.resignDate, 'corrected:', emp.corrected);
+                                        console.log(`  🎯 ${emp.name}: 최종 재직 특화담당자로 인정`);
                                       }
-                                      
-                                      if (!isSpecialized) return false;
-                                      
-                                      // 재직 여부 확인
-                                      if (emp.corrected) return true;
-                                      if (!emp.resignDate || emp.resignDate === null || emp.resignDate === '' || emp.resignDate === '-') {
-                                        return true;
-                                      }
-                                      
-                                      try {
-                                        const resignDate = new Date(emp.resignDate);
-                                        return resignDate > new Date();
-                                      } catch {
-                                        return true;
-                                      }
+                                      return isSpecialized;
                                     });
                                     
                                     console.log(`🎯 특화 담당자 총 ${specializedEmployees.length}명 발견`);

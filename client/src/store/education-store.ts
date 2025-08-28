@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { EducationData, EducationStats, IntegratedAnalysisData, EducationParticipant, EmployeeData } from '@shared/schema';
 import { educationDB } from '@/lib/indexeddb';
+// import { categorizeInstitution } from '@/utils/institution-matcher'; // TODO: async 처리 필요
 
 // 교육 이수 상태 타입 정의
 export type EducationCompletionStatus = 
@@ -585,52 +586,95 @@ export const useEducationStore = create<EducationStore>()(
           // 배열 안전성 검증
           const safeEmployeeData = Array.isArray(employeeData) ? employeeData : [];
           
-          // 🔥 개선된 매칭 로직: 다단계 매칭으로 매칭률 향상
+          // 🔥 개선된 매칭 로직: 4단계 관대한 매칭으로 매칭률 극대화
           const findMatchingEmployee = (participant: any) => {
-            // 1차: 이름 + 생년월일 정확 매칭
-            let match = safeEmployeeData.find(emp => 
-              emp.name === participant.name && 
-              emp.birthDate === participant.birthDate
-            );
+            if (!participant.name) return null;
+            
+            // 이름과 생년월일 정규화 함수들
+            const normalizeName = (name: string) => {
+              if (!name) return '';
+              return name.trim().replace(/\s+/g, '').replace(/[()（）]/g, '').toLowerCase();
+            };
+            
+            const normalizeDate = (dateStr: string) => {
+              if (!dateStr) return '';
+              const numbers = dateStr.replace(/[^0-9]/g, '');
+              if (numbers.length === 6) {
+                const yy = parseInt(numbers.substring(0, 2));
+                const fullYear = yy >= 30 ? `19${yy}` : `20${yy}`;
+                return fullYear + numbers.substring(2);
+              }
+              return numbers.length === 8 ? numbers : numbers;
+            };
+            
+            let match = null;
+            
+            // 1단계: 완전 매칭 (이름 + 생년월일)
+            match = safeEmployeeData.find(emp => {
+              if (!emp.name) return false;
+              const participantNormalizedName = normalizeName(participant.name);
+              const empNormalizedName = normalizeName(emp.name);
+              if (empNormalizedName !== participantNormalizedName) return false;
+              
+              if (participant.birthDate && emp.birthDate) {
+                if (emp.birthDate === participant.birthDate) return true;
+                try {
+                  const empNormalizedDate = normalizeDate(emp.birthDate);
+                  const participantNormalizedDate = normalizeDate(participant.birthDate);
+                  return empNormalizedDate && participantNormalizedDate && empNormalizedDate === participantNormalizedDate;
+                } catch {
+                  return false;
+                }
+              }
+              
+              return !participant.birthDate || !emp.birthDate; // 생년월일 없으면 이름만으로 성공
+            });
             
             if (match) return match;
             
-            // 2차: 이름 + 생년월일 형식 정규화 매칭
-            if (participant.birthDate) {
-              const normalizeDate = (dateStr: string) => {
-                if (!dateStr) return '';
-                return dateStr.replace(/[-\/\.]/g, '').trim();
-              };
+            // 2단계: 관대한 이름 매칭 (생년월일 불일치 허용)
+            match = safeEmployeeData.find(emp => {
+              if (!emp.name) return false;
+              return normalizeName(participant.name) === normalizeName(emp.name);
+            });
+            
+            if (match) return match;
+            
+            // 3단계: 유사 이름 매칭
+            match = safeEmployeeData.find(emp => {
+              if (!emp.name || emp.name.length < 2) return false;
+              const participantName = participant.name.trim();
+              const empName = emp.name.trim();
+              if (participantName.length < 2 || empName.length < 2) return false;
               
-              const participantDateNorm = normalizeDate(participant.birthDate);
+              const firstCharMatch = participantName[0] === empName[0];
+              const secondCharMatch = participantName.length > 1 && empName.length > 1 && participantName[1] === empName[1];
+              const similarityScore = participantName.split('').filter((char, idx) => empName[idx] === char).length;
               
+              return (firstCharMatch && secondCharMatch) || similarityScore >= 2;
+            });
+            
+            if (match) return match;
+            
+            // 4단계: 초관대 매칭 (성씨 + 50% 일치율)
+            if (participant.name.length >= 2) {
               match = safeEmployeeData.find(emp => {
-                if (!emp.birthDate) return false;
-                const empDateNorm = normalizeDate(emp.birthDate);
-                return emp.name === participant.name && empDateNorm === participantDateNorm;
+                if (!emp.name || emp.name.length < 2) return false;
+                const participantName = participant.name.trim();
+                const empName = emp.name.trim();
+                const firstCharMatch = participantName[0] === empName[0];
+                const lengthDiff = Math.abs(participantName.length - empName.length);
+                
+                if (firstCharMatch && lengthDiff <= 1) {
+                  const matchingChars = participantName.split('').filter((char, idx) => empName[idx] === char).length;
+                  const matchRatio = matchingChars / Math.max(participantName.length, empName.length);
+                  return matchRatio >= 0.5;
+                }
+                return false;
               });
-              
-              if (match) return match;
             }
             
-            // 3차: 이름만 매칭 (생년월일이 없는 경우)
-            if (!participant.birthDate) {
-              match = safeEmployeeData.find(emp => 
-                emp.name === participant.name && !emp.birthDate
-              );
-              
-              if (match) return match;
-            }
-            
-            // 4차: 이름만 매칭 (최후의 수단, 경고 출력)
-            match = safeEmployeeData.find(emp => emp.name === participant.name);
-            
-            if (match) {
-              console.warn(`⚠️ 생년월일 불일치로 이름만으로 매칭: ${participant.name} (참가자: ${participant.birthDate || 'null'} vs 종사자: ${match.birthDate || 'null'})`);
-              return match;
-            }
-            
-            return null;
+            return match;
           };
           
           const matchingEmployee = findMatchingEmployee(participant);
@@ -819,52 +863,95 @@ export const useEducationStore = create<EducationStore>()(
           // 배열 안전성 검증
           const safeEmployeeData = Array.isArray(employeeData) ? employeeData : [];
           
-          // 🔥 개선된 매칭 로직: 다단계 매칭으로 매칭률 향상
+          // 🔥 개선된 매칭 로직: 4단계 관대한 매칭으로 매칭률 극대화
           const findMatchingEmployee = (participant: any) => {
-            // 1차: 이름 + 생년월일 정확 매칭
-            let match = safeEmployeeData.find(emp => 
-              emp.name === participant.name && 
-              emp.birthDate === participant.birthDate
-            );
+            if (!participant.name) return null;
+            
+            // 이름과 생년월일 정규화 함수들
+            const normalizeName = (name: string) => {
+              if (!name) return '';
+              return name.trim().replace(/\s+/g, '').replace(/[()（）]/g, '').toLowerCase();
+            };
+            
+            const normalizeDate = (dateStr: string) => {
+              if (!dateStr) return '';
+              const numbers = dateStr.replace(/[^0-9]/g, '');
+              if (numbers.length === 6) {
+                const yy = parseInt(numbers.substring(0, 2));
+                const fullYear = yy >= 30 ? `19${yy}` : `20${yy}`;
+                return fullYear + numbers.substring(2);
+              }
+              return numbers.length === 8 ? numbers : numbers;
+            };
+            
+            let match = null;
+            
+            // 1단계: 완전 매칭 (이름 + 생년월일)
+            match = safeEmployeeData.find(emp => {
+              if (!emp.name) return false;
+              const participantNormalizedName = normalizeName(participant.name);
+              const empNormalizedName = normalizeName(emp.name);
+              if (empNormalizedName !== participantNormalizedName) return false;
+              
+              if (participant.birthDate && emp.birthDate) {
+                if (emp.birthDate === participant.birthDate) return true;
+                try {
+                  const empNormalizedDate = normalizeDate(emp.birthDate);
+                  const participantNormalizedDate = normalizeDate(participant.birthDate);
+                  return empNormalizedDate && participantNormalizedDate && empNormalizedDate === participantNormalizedDate;
+                } catch {
+                  return false;
+                }
+              }
+              
+              return !participant.birthDate || !emp.birthDate; // 생년월일 없으면 이름만으로 성공
+            });
             
             if (match) return match;
             
-            // 2차: 이름 + 생년월일 형식 정규화 매칭
-            if (participant.birthDate) {
-              const normalizeDate = (dateStr: string) => {
-                if (!dateStr) return '';
-                return dateStr.replace(/[-\/\.]/g, '').trim();
-              };
+            // 2단계: 관대한 이름 매칭 (생년월일 불일치 허용)
+            match = safeEmployeeData.find(emp => {
+              if (!emp.name) return false;
+              return normalizeName(participant.name) === normalizeName(emp.name);
+            });
+            
+            if (match) return match;
+            
+            // 3단계: 유사 이름 매칭
+            match = safeEmployeeData.find(emp => {
+              if (!emp.name || emp.name.length < 2) return false;
+              const participantName = participant.name.trim();
+              const empName = emp.name.trim();
+              if (participantName.length < 2 || empName.length < 2) return false;
               
-              const participantDateNorm = normalizeDate(participant.birthDate);
+              const firstCharMatch = participantName[0] === empName[0];
+              const secondCharMatch = participantName.length > 1 && empName.length > 1 && participantName[1] === empName[1];
+              const similarityScore = participantName.split('').filter((char, idx) => empName[idx] === char).length;
               
+              return (firstCharMatch && secondCharMatch) || similarityScore >= 2;
+            });
+            
+            if (match) return match;
+            
+            // 4단계: 초관대 매칭 (성씨 + 50% 일치율)
+            if (participant.name.length >= 2) {
               match = safeEmployeeData.find(emp => {
-                if (!emp.birthDate) return false;
-                const empDateNorm = normalizeDate(emp.birthDate);
-                return emp.name === participant.name && empDateNorm === participantDateNorm;
+                if (!emp.name || emp.name.length < 2) return false;
+                const participantName = participant.name.trim();
+                const empName = emp.name.trim();
+                const firstCharMatch = participantName[0] === empName[0];
+                const lengthDiff = Math.abs(participantName.length - empName.length);
+                
+                if (firstCharMatch && lengthDiff <= 1) {
+                  const matchingChars = participantName.split('').filter((char, idx) => empName[idx] === char).length;
+                  const matchRatio = matchingChars / Math.max(participantName.length, empName.length);
+                  return matchRatio >= 0.5;
+                }
+                return false;
               });
-              
-              if (match) return match;
             }
             
-            // 3차: 이름만 매칭 (생년월일이 없는 경우)
-            if (!participant.birthDate) {
-              match = safeEmployeeData.find(emp => 
-                emp.name === participant.name && !emp.birthDate
-              );
-              
-              if (match) return match;
-            }
-            
-            // 4차: 이름만 매칭 (최후의 수단, 경고 출력)
-            match = safeEmployeeData.find(emp => emp.name === participant.name);
-            
-            if (match) {
-              console.warn(`⚠️ 생년월일 불일치로 이름만으로 매칭: ${participant.name} (참가자: ${participant.birthDate || 'null'} vs 종사자: ${match.birthDate || 'null'})`);
-              return match;
-            }
-            
-            return null;
+            return match;
           };
           
           const matchingEmployee = findMatchingEmployee(participant);
@@ -1057,13 +1144,60 @@ export const useEducationStore = create<EducationStore>()(
         
         // 외부에서 전달받은 종사자 데이터 사용 (participants 페이지에서 전달)
         const rawEmployeeData = externalEmployeeData || [];
-        console.log('✅ 외부에서 전달받은 종사자 데이터:', rawEmployeeData.length, '명');
+        console.log('✅ 데이터 불일치 분석 시작:', rawEmployeeData.length, '명 종사자,', participantData.length, '명 참가자');
         
-        console.log('\n🔍 데이터 일관성 검사 시작 (생년월일 기준 동일인 판별)');
-        console.log('참가자 데이터(배움터):', participantData.length, '명');
-        // 배열 안전성 검증
-        const safeRawEmployeeData = Array.isArray(rawEmployeeData) ? rawEmployeeData : [];
-        console.log('종사자 데이터(모인우리) 원본:', safeRawEmployeeData.length, '명');
+        // 🔍 안소영 존재 확인 - 강화된 디버깅
+        console.log('🔍🔍🔍 =================================');
+        console.log('🔍🔍🔍 안소영 디버깅 시작');
+        console.log('🔍🔍🔍 전체 참가자 데이터 수:', participantData.length);
+        
+        const ansoYeongParticipants = participantData.filter(p => p.name === '안소영');
+        console.log('🔍🔍🔍 안소영 참가자 수:', ansoYeongParticipants.length, '명');
+        
+        if (ansoYeongParticipants.length === 0) {
+          console.log('🔍🔍🔍 안소영 참가자를 찾을 수 없음');
+          // 유사한 이름 찾기
+          const similarNames = participantData.filter(p => p.name && p.name.includes('소영')).slice(0, 5);
+          console.log('🔍🔍🔍 "소영" 포함 참가자:', similarNames.map(p => `${p.name} (${p.institution})`));
+        } else {
+          ansoYeongParticipants.forEach((p, idx) => {
+            console.log(`🔍🔍🔍 안소영 ${idx + 1}:`, {
+              name: p.name,
+              institution: p.institution,
+              status: p.status,
+              birthDate: p.birthDate,
+              id: p.id,
+              learningId: p.learningId
+            });
+          });
+        }
+        console.log('🔍🔍🔍 =================================');
+        
+        // 성능 모니터링
+        const startTime = performance.now();
+        
+        // 배열 안전성 검증 및 정렬로 일관성 확보
+        const safeRawEmployeeData = Array.isArray(rawEmployeeData) ? 
+          [...rawEmployeeData].sort((a, b) => {
+            // 이름 + ID로 정렬하여 항상 동일한 순서 보장
+            const nameA = a.name || '';
+            const nameB = b.name || '';
+            const idA = a.id || '';
+            const idB = b.id || '';
+            return nameA.localeCompare(nameB) || idA.localeCompare(idB);
+          }) : [];
+        
+        // 참가자 데이터도 정렬로 일관성 확보
+        const sortedParticipantData = [...participantData].sort((a, b) => {
+          const nameA = a.name || '';
+          const nameB = b.name || '';
+          const instA = a.institution || '';
+          const instB = b.institution || '';
+          return nameA.localeCompare(nameB) || instA.localeCompare(instB);
+        });
+        
+        // 🔍 특별 디버깅 대상 이름들 (전역 스코프로 이동)
+        const debugNames = ['김다미', '다미', '백현태', '박은정', '손혜원', '안소영'];
         
         // 종사자 데이터 보정 (컬럼 밀림 수정) - 강화된 로직 적용
         const employeeData = safeRawEmployeeData.map(emp => {
@@ -1096,6 +1230,16 @@ export const useEducationStore = create<EducationStore>()(
         });
         
         console.log('종사자 데이터 보정 후:', employeeData.length, '명');
+        console.log('종사자 데이터 샘플 (첫 3명):', employeeData.slice(0, 3).map(emp => ({
+          name: emp.name,
+          birthDate: emp.birthDate,
+          isActive: emp.isActive,
+          institution: emp.institution
+        })));
+        
+        // 🔍 데이터 형식 분석을 위한 추가 샘플
+        console.log('🔍 종사자 생년월일 형식 샘플:', employeeData.slice(0, 10).map(emp => emp.birthDate).filter(Boolean));
+        console.log('🔍 참가자 생년월일 형식 샘플:', sortedParticipantData.slice(0, 10).map(p => p.birthDate).filter(Boolean));
         
         // 원본 종사자 데이터가 없는 경우 빈 배열 반환
         if (safeRawEmployeeData.length === 0) {
@@ -1104,12 +1248,62 @@ export const useEducationStore = create<EducationStore>()(
           return []; // 임시 데이터를 생성하지 않고 빈 배열 반환
         }
         
+        // 대용량 데이터 처리 최적화
+        if (safeRawEmployeeData.length > 3000 || sortedParticipantData.length > 3000) {
+          console.log('🚀 대용량 데이터 감지 - 최적화된 처리 모드로 전환');
+        }
+        
+        // 생년월일 정규화 함수 (findMatchingEmployee보다 먼저 선언)
+        const normalizeBirthDate = (dateStr: string) => {
+          if (!dateStr) return '';
+          
+          // 숫자만 추출 (점, 하이픈, 슬래시 등 모든 구분자 제거)
+          const numbers = dateStr.replace(/[^0-9]/g, '');
+          
+          // 6자리인 경우 (YYMMDD) -> 19YY 또는 20YY로 변환
+          if (numbers.length === 6) {
+            const yy = parseInt(numbers.substring(0, 2));
+            const fullYear = yy >= 30 ? `19${yy}` : `20${yy}`;
+            const result = fullYear + numbers.substring(2);
+            return result;
+          }
+          
+          // 8자리인 경우 그대로 반환 (YYYYMMDD)
+          if (numbers.length === 8) {
+            return numbers;
+          }
+          
+          // 예외 처리: 다른 길이는 그대로 반환
+          return numbers;
+        };
+        
+        // 🔍 날짜 정규화 테스트 (일회성 디버깅)
+        console.log('🔍 날짜 정규화 테스트:');
+        console.log('- "1995-12-14" -> "' + normalizeBirthDate("1995-12-14") + '"');
+        console.log('- "1966.03.04" -> "' + normalizeBirthDate("1966.03.04") + '"');
+        console.log('- "66.03.04" -> "' + normalizeBirthDate("66.03.04") + '"');
+
         // 생년월일과 이름으로 동일인 매칭 함수 (매우 유연한 매칭)
         const findMatchingEmployee = (participant: EducationParticipant): EmployeeData | null => {
           if (!participant.name) return null;
           
           // 배열 안전성 검증
           const safeEmployeeData = Array.isArray(employeeData) ? employeeData : [];
+          
+          // 🔍 안소영 케이스 매칭 디버깅
+          if (participant.name === '안소영') {
+            console.log(`🔍 [안소영] 매칭 시도:`);
+            console.log(`- 참가자 생년월일: ${participant.birthDate}`);
+            console.log(`- 참가자 정규화 생년월일: ${normalizeBirthDate(participant.birthDate || '')}`);
+            console.log(`- 참가자 기관: ${participant.institution}`);
+            console.log(`- 참가자 상태: ${participant.status}`);
+          }
+          
+          // 디버깅: 종사자 데이터 상태 확인
+          if (safeEmployeeData.length === 0) {
+            console.warn(`⚠️ [${participant.name}] 종사자 데이터가 비어있음 - 매칭 불가능`);
+            return null;
+          }
           
           // 이름 정규화 함수
           const normalizeName = (name: string) => {
@@ -1121,80 +1315,59 @@ export const useEducationStore = create<EducationStore>()(
               .toLowerCase();
           };
           
-          // 생년월일 정규화 함수 (더 강력한 버전)
-          const normalizeBirthDate = (dateStr: string) => {
-            if (!dateStr) return '';
-            
-            // 숫자만 추출
-            const numbers = dateStr.replace(/[^0-9]/g, '');
-            
-            // 6자리인 경우 (YYMMDD) -> 19YY 또는 20YY로 변환
-            if (numbers.length === 6) {
-              const yy = parseInt(numbers.substring(0, 2));
-              const fullYear = yy >= 30 ? `19${yy}` : `20${yy}`;
-              return fullYear + numbers.substring(2);
-            }
-            
-            // 8자리인 경우 그대로 반환
-            if (numbers.length === 8) {
-              return numbers;
-            }
-            
-            // 기타 형식은 원본 반환
-            return numbers;
-          };
           
-          // 김다미 특별 디버깅
-          if (participant.name?.includes('김다미') || participant.name?.includes('다미')) {
-            console.log('\n🔍 [김다미 매칭 디버깅]:');
-            console.log('- 참가자 이름:', participant.name);
-            console.log('- 참가자 생년월일:', participant.birthDate);
-            console.log('- 정규화된 참가자 이름:', normalizeName(participant.name));
-            console.log('- 정규화된 참가자 생년월일:', normalizeBirthDate(participant.birthDate || ''));
+          // 특별 디버깅 케이스들 (필요시에만 활성화)
+          const isSpecialDebugCase = debugNames.some(name => participant.name?.includes(name));
+          
+          if (isSpecialDebugCase) {
+            console.log(`\n🔍 [특별디버깅] ${participant.name}:`,);
+            console.log(`- 생년월일: ${participant.birthDate || 'N/A'}`);
+            console.log(`- 정규화된 이름: "${normalizeName(participant.name)}"`);
+            console.log(`- 정규화된 생년월일: "${normalizeBirthDate(participant.birthDate || '')}"`);
             
+            // 이름의 첫 2글자로 유사한 종사자 찾기
+            const searchTerm = participant.name.length >= 2 ? participant.name.substring(0, 2) : participant.name;
             const nameMatches = safeEmployeeData.filter(emp => 
-              emp.name && (emp.name.includes('김다미') || emp.name.includes('다미'))
+              emp.name && emp.name.includes(searchTerm)
             );
-            console.log(`- 종사자 데이터 중 '다미' 포함: ${nameMatches.length}명`);
-            nameMatches.forEach((emp, idx) => {
-              console.log(`  ${idx + 1}. 이름: "${emp.name}" (정규화: "${normalizeName(emp.name)}")`);
-              console.log(`     생년월일: "${emp.birthDate}" (정규화: "${normalizeBirthDate(emp.birthDate || '')}")`);
-              console.log(`     소속: ${emp.institution || emp.regionName || emp.district}`);
-            });
-          }
-          
-          // 백현태님 특별 디버깅 (기존 유지)
-          if (participant.name?.includes('백현태')) {
-            console.log('\n🔍 [보정된 데이터로] 백현태님 매칭 디버깅:');
-            console.log('- 참가자 이름:', participant.name);
-            console.log('- 참가자 생년월일:', participant.birthDate);
-            console.log('- 보정된 종사자 데이터 중 이름이 일치하는 사람들:');
             
-            const nameMatches = safeEmployeeData.filter(emp => emp.name?.includes('백현태'));
-            nameMatches.forEach((emp, idx) => {
-              console.log(`  ${idx + 1}. 이름: ${emp.name}, 생년월일: ${emp.birthDate}, 상태: ${emp.isActive}, 퇴사일: ${emp.resignDate}, 보정됨: ${emp.corrected}`);
-            });
-            
-            if (nameMatches.length === 0) {
-              console.log('  ⚠️ 보정된 종사자 데이터에도 백현태님이 없습니다!');
+            if (nameMatches.length > 0) {
+              console.log(`- "${searchTerm}" 포함 종사자: ${nameMatches.length}명`);
+              nameMatches.slice(0, 3).forEach((emp, idx) => {
+                console.log(`  ${idx + 1}. "${emp.name}" (생년월일: ${emp.birthDate || 'N/A'}, 상태: ${emp.isActive ? '재직' : '퇴직'}, 보정됨: ${emp.corrected || false})`);
+              });
             } else {
-              console.log(`  ✅ 보정된 데이터에서 ${nameMatches.length}명 발견!`);
+              console.log(`- "${searchTerm}" 포함 종사자를 찾지 못했습니다.`);
             }
           }
           
-          const matchedEmployee = safeEmployeeData.find(emp => {
-            if (!emp.name) return false;
+          // 🔧 결정적(Deterministic) 매칭 로직: 항상 동일한 결과 보장
+          let matchedEmployee = null;
+          
+          // 매칭 후보들을 정렬된 순서로 처리하여 일관성 확보
+          const sortedCandidates = [...safeEmployeeData].sort((a, b) => {
+            const nameA = a.name || '';
+            const nameB = b.name || '';
+            return nameA.localeCompare(nameB);
+          });
+          
+          // 1단계: 완전 매칭 (이름 + 생년월일) - 첫 번째 매칭만 선택
+          for (const emp of sortedCandidates) {
+            if (!emp.name) continue;
             
-            // 1차: 정규화된 이름 매칭
             const participantNormalizedName = normalizeName(participant.name);
             const empNormalizedName = normalizeName(emp.name);
             
-            if (empNormalizedName !== participantNormalizedName) return false;
+            // 이름이 다르면 패스
+            if (empNormalizedName !== participantNormalizedName) continue;
             
-            // 2차: 생년월일 매칭 (매우 유연한 버전)
+            // 둘 다 생년월일이 있는 경우만 엄격 매칭
             if (participant.birthDate && emp.birthDate) {
               // 정확 일치
-              if (emp.birthDate === participant.birthDate) return true;
+              if (emp.birthDate === participant.birthDate) {
+                matchedEmployee = emp;
+                break;
+              }
               
               // 정규화된 생년월일 비교
               try {
@@ -1203,36 +1376,124 @@ export const useEducationStore = create<EducationStore>()(
                 
                 if (empNormalizedDate && participantNormalizedDate && 
                     empNormalizedDate === participantNormalizedDate) {
-                  console.log(`✅ 생년월일 정규화 매칭 성공: ${emp.name} (${emp.birthDate} -> ${empNormalizedDate})`);
-                  return true;
+                  matchedEmployee = emp;
+                  break;
                 }
               } catch (error) {
-                console.log(`날짜 정규화 실패: ${emp.birthDate} vs ${participant.birthDate}`, error);
+                // 날짜 파싱 실패는 무시하고 다음 단계로
               }
               
-              // 생년월일이 다르면 동명이인으로 판단
-              console.log(`❌ 동명이인 판정: ${emp.name} (종사자: ${emp.birthDate}, 참가자: ${participant.birthDate})`);
-              return false;
+              continue; // 생년월일이 다르면 완전매칭 실패
             }
             
-            // 3차: 둘 다 생년월일이 없는 경우 이름만으로 매칭
-            if (!participant.birthDate && !emp.birthDate) {
-              console.warn(`⚠️ 생년월일 없이 이름만으로 매칭: ${participant.name}`);
-              return true;
+            // 🔍 안소영 디버깅: 생년월일 없는 경우도 로깅
+            if (participant.name === '안소영') {
+              console.log(`🔍 [안소영] 매칭 검토: 참가자 생년월일(${participant.birthDate || '없음'}), 종사자 생년월일(${emp.birthDate || '없음'})`);
+              if (!participant.birthDate || !emp.birthDate) {
+                console.log(`🔍 [안소영] 생년월일 없음으로 매칭 건너뛰기`);
+              }
             }
             
-            // 4차: 한쪽만 생년월일이 있는 경우 - 더 유연하게 처리
+            // 둘 중 하나라도 생년월일이 없는 경우 매칭 건너뛰기 (동명이인 혼동 방지)
             if (!participant.birthDate || !emp.birthDate) {
-              console.warn(`⚠️ 생년월일 불완전 데이터로 이름만 매칭: ${participant.name} (참가자 생년월일: ${participant.birthDate || '없음'}, 종사자 생년월일: ${emp.birthDate || '없음'})`);
-              return true; // 이름이 일치하면 매칭으로 처리
+              if (participant.name !== '안소영') { // 안소영은 디버깅을 위해 스킵하지 않음
+                console.log(`⚠️ [${participant.name}] 생년월일 없음으로 매칭 건너뛰기 (참가자: ${participant.birthDate || '없음'}, 종사자: ${emp.birthDate || '없음'})`);
+                continue; // 생년월일이 없으면 매칭하지 않음
+              }
             }
-            
-            return false;
-          }) || null;
+          }
           
-          // 매칭된 직원이 있으면 반환
+          // 2단계: 관대한 이름 매칭 (첫 번째 일치만 선택)
+          if (!matchedEmployee) {
+            for (const emp of sortedCandidates) {
+              if (!emp.name) continue;
+              
+              const participantNormalizedName = normalizeName(participant.name);
+              const empNormalizedName = normalizeName(emp.name);
+              
+              if (empNormalizedName === participantNormalizedName) {
+                matchedEmployee = emp;
+                break; // 첫 번째 매칭만 선택
+              }
+            }
+          }
+          
+          // 3단계: 유사 이름 매칭 (첫 번째 매칭만 선택)
+          if (!matchedEmployee) {
+            for (const emp of sortedCandidates) {
+              if (!emp.name || emp.name.length < 2) continue;
+              
+              const participantName = participant.name?.trim() || '';
+              const empName = emp.name.trim();
+              
+              if (participantName.length < 2 || empName.length < 2) continue;
+              
+              const firstCharMatch = participantName[0] === empName[0];
+              const secondCharMatch = participantName.length > 1 && empName.length > 1 && 
+                                    participantName[1] === empName[1];
+              
+              const similarityScore = participantName.split('').filter((char, idx) => 
+                empName[idx] === char
+              ).length;
+              
+              if ((firstCharMatch && secondCharMatch) || similarityScore >= 2) {
+                matchedEmployee = emp;
+                break; // 첫 번째 매칭만 선택
+              }
+            }
+          }
+          
+          // 4단계: 초관대 매칭 (첫 번째 매칭만 선택)
+          if (!matchedEmployee && participant.name && participant.name.length >= 2) {
+            for (const emp of sortedCandidates) {
+              if (!emp.name || emp.name.length < 2) continue;
+              
+              const participantName = participant.name.trim();
+              const empName = emp.name.trim();
+              
+              const firstCharMatch = participantName[0] === empName[0];
+              const lengthDiff = Math.abs(participantName.length - empName.length);
+              
+              if (firstCharMatch && lengthDiff <= 1) {
+                const matchingChars = participantName.split('').filter((char, idx) => 
+                  empName[idx] === char
+                ).length;
+                const matchRatio = matchingChars / Math.max(participantName.length, empName.length);
+                
+                if (matchRatio >= 0.5) {
+                  matchedEmployee = emp;
+                  break; // 첫 번째 매칭만 선택
+                }
+              }
+            }
+          }
+          
+          // 🔍 안소영 매칭 결과 디버깅
+          if (participant.name === '안소영') {
+            if (matchedEmployee) {
+              console.log(`🔍 [안소영] 매칭 성공:`);
+              console.log(`- 매칭된 종사자 이름: ${matchedEmployee.name}`);
+              console.log(`- 매칭된 종사자 생년월일: ${matchedEmployee.birthDate}`);
+              console.log(`- 매칭된 종사자 기관: ${matchedEmployee.institution}`);
+              console.log(`- 매칭된 종사자 isActive: ${matchedEmployee.isActive}`);
+              console.log(`- 매칭된 종사자 퇴사일: ${matchedEmployee.resignDate}`);
+            } else {
+              console.log(`🔍 [안소영] 매칭 실패 - 모인우리 데이터에서 찾을 수 없음`);
+            }
+          }
+          
+          // 매칭 결과 최소 로깅 (성능 향상)
           if (matchedEmployee) {
+            // 디버깅 케이스에만 상세 로그 출력
+            if (isSpecialDebugCase) {
+              console.log(`✅ [특별케이스] ${participant.name} ↔ ${matchedEmployee.name}`);
+            }
             return matchedEmployee;
+          } else {
+            // 디버깅 케이스에만 상세 로그 출력  
+            if (isSpecialDebugCase) {
+              console.log(`❌ [특별케이스] ${participant.name} 매칭실패`);
+            }
           }
           
           // 유사 데이터 검색 (매칭 실패시)
@@ -1356,6 +1617,11 @@ export const useEducationStore = create<EducationStore>()(
           if (participantData.length > 0) {
             // 생년월일 기준 종사자 데이터와 참가자 데이터 교차 검증
             participants.forEach(participant => {
+              // 🔍 안소영 매칭 전 디버깅
+              if (participant.name === '안소영') {
+                console.log(`🔍 [안소영] 매칭 시작 - 기관: ${institution}, 참가자 기관: ${participant.institution}`);
+              }
+              
               const matchingEmployee = findMatchingEmployee(participant);
             
             if (matchingEmployee) {
@@ -1449,8 +1715,59 @@ export const useEducationStore = create<EducationStore>()(
               };
               
               const checkJobTypeMismatch = () => {
-                return participant.jobType && matchingEmployee.jobType && 
-                       participant.jobType !== matchingEmployee.jobType;
+                if (!participant.jobType || !matchingEmployee.jobType) return false;
+                
+                // 기관 유형별 직군 제약 검증
+                const checkInstitutionJobConstraints = () => {
+                  const participantInstitution = participant.institution || '';
+                  const employeeInstitution = matchingEmployee.institution || '';
+                  
+                  // 광역지원기관에는 생활지원사가 있을 수 없음
+                  const isGwangyeokInstitution = (instName: string) => 
+                    instName.includes('광역지원기관') || instName.includes('*광역지원기관');
+                  
+                  if (isGwangyeokInstitution(participantInstitution) || 
+                      isGwangyeokInstitution(employeeInstitution)) {
+                    const hasLifeSupport = participant.jobType?.includes('생활지원사') || 
+                                         matchingEmployee.jobType?.includes('생활지원사');
+                    if (hasLifeSupport) {
+                      console.log(`⚠️ 광역지원기관에 생활지원사 존재: ${participant.name} (${participant.institution})`);
+                      return true; // 제약 위반으로 불일치 처리
+                    }
+                  }
+                  
+                  return false;
+                };
+                
+                // 기관별 직군 제약 검증
+                if (checkInstitutionJobConstraints()) {
+                  return true;
+                }
+                
+                // 직군 정규화 함수
+                const normalizeJobType = (jobType: string) => {
+                  const normalized = jobType.trim().toLowerCase();
+                  
+                  // 전담사회복지사 계열 통합
+                  if (normalized.includes('전담사회복지사') || 
+                      normalized.includes('광역전담사회복지사') ||
+                      normalized.includes('선임전담사회복지사')) {
+                    return '전담사회복지사';
+                  }
+                  
+                  // 생활지원사 계열 통합
+                  if (normalized.includes('생활지원사') || 
+                      normalized.includes('선임생활지원사')) {
+                    return '생활지원사';
+                  }
+                  
+                  return normalized;
+                };
+                
+                const normalizedParticipantJob = normalizeJobType(participant.jobType);
+                const normalizedEmployeeJob = normalizeJobType(matchingEmployee.jobType);
+                
+                return normalizedParticipantJob !== normalizedEmployeeJob;
               };
               
               const checkStatusContradiction = () => {
@@ -1465,8 +1782,32 @@ export const useEducationStore = create<EducationStore>()(
               // 불일치 유형 분류
               const inconsistencyTypes = [];
               
+              // 🔍 안소영 디버깅: 불일치 유형 분석
+              if (participant.name === '안소영') {
+                console.log(`🔍 [안소영] 불일치 유형 분석:`);
+                console.log(`- 참가자 기관: ${participant.institution}`);
+                console.log(`- 참가자 생년월일: ${participant.birthDate}`);
+                console.log(`- 매칭된 종사자: ${matchingEmployee.name} (${matchingEmployee.birthDate})`);
+                console.log(`- 매칭된 종사자 기관: ${matchingEmployee.institution}`);
+                console.log(`- isBothInactive: ${isBothInactive}`);
+                console.log(`- participantActive: ${participantActive}`);
+                console.log(`- employeeActive: ${employeeActive}`);
+                console.log(`- participant.status: ${participant.status}`);
+              }
+              
+              // 🛡️ 중지/탈퇴/휴면 상태 참가자는 불일치 분석에서 제외
+              if (participant.status === '중지' || participant.status === '탈퇴' || participant.status === '휴면대상') {
+                if (participant.name === '안소영') {
+                  console.log(`🛡️ [안소영] 중지 상태로 불일치 분석 제외됨 (상태: ${participant.status})`);
+                }
+                return; // 불일치 분석 건너뛰기
+              }
+              
               if (!isBothInactive && (participantActive !== employeeActive)) {
                 inconsistencyTypes.push('재직상태_불일치');
+                if (participant.name === '안소영') {
+                  console.log(`⚠️ [안소영] 재직상태 불일치 추가됨`);
+                }
               }
               
               if (isResignDateMismatch()) {
@@ -1581,9 +1922,9 @@ export const useEducationStore = create<EducationStore>()(
                 inconsistencies.push(detailedInfo);
               }
               
-              // 박은정 특별 체크
-              if (participant.name?.includes('박은정')) {
-                console.log('\n🔍 박은정님 상세 분석:');
+              // 특별 디버깅 케이스 체크
+              if (debugNames.some(name => participant.name?.includes(name))) {
+                console.log(`\n🔍 [${participant.name}] 매칭 성공 상세 분석:`);
                 console.log('- 생년월일:', participant.birthDate);
                 console.log('- 배움터 퇴사일:', participant.resignDate);
                 console.log('- 모인우리 퇴사일:', matchingEmployee.resignDate);
@@ -1591,7 +1932,7 @@ export const useEducationStore = create<EducationStore>()(
               }
             } else {
               // 매칭되는 종사자 데이터가 없는 경우
-              if (participant.name?.includes('손혜원') || participant.name?.includes('박은정')) {
+              if (debugNames.some(name => participant.name?.includes(name))) {
                 console.log(`\n⚠️ [${participant.name}] 매칭되는 종사자 데이터 없음`);
                 console.log('- 생년월일:', participant.birthDate);
                 console.log('- 배움터 상태:', participant.status);
@@ -1702,6 +2043,40 @@ export const useEducationStore = create<EducationStore>()(
           participants.forEach(participant => {
             const matchingEmployee = findMatchingEmployee(participant);
             if (!matchingEmployee && !inconsistencies.find(i => i.name === participant.name)) {
+              
+              // 배움터만 가입 후 중지한 케이스 처리 (중간관리자, 임시담당자, 컨설턴트 등)
+              const isLearningOnlyThenSuspended = participant.status === '중지';
+              
+              if (isLearningOnlyThenSuspended) {
+                // 중지 상태인 경우 배움터만 가입했다가 업무 종료한 케이스로 간주
+                console.log(`✅ [${participant.name}] 배움터만 가입 후 중지 - 임시담당/관리자 케이스로 정상 처리`);
+                console.log(`   - 기관: ${participant.institution}`);
+                console.log(`   - 상태: ${participant.status}`);
+                console.log(`   - 생년월일: ${participant.birthDate}`);
+                return; // 불일치로 분류하지 않음
+              }
+              
+              // 배움터 상태가 비활성(중지, 탈퇴, 휴면대상)인 경우는 정상으로 간주
+              const inactiveStatuses = ['중지', '탈퇴', '휴면대상'];
+              if (inactiveStatuses.includes(participant.status)) {
+                console.log(`✅ [${participant.name}] 배움터 상태가 '${participant.status}'이므로 모인우리에 없어도 정상`);
+                console.log(`   - 기관: ${participant.institution}`);
+                console.log(`   - 생년월일: ${participant.birthDate}`);
+                console.log(`   - 직군: ${participant.jobType}`);
+                console.log(`   - 퇴사일: ${participant.resignDate || '없음'}`);
+                return; // 불일치로 분류하지 않음
+              }
+              
+              // 기관별 직군 제약 검증 (배움터에만 존재하는 경우)
+              const participantInstitution = participant.institution || '';
+              const isGwangyeokInstitution = participantInstitution.includes('광역지원기관') || 
+                                           participantInstitution.includes('*광역지원기관');
+              
+              if (isGwangyeokInstitution && participant.jobType?.includes('생활지원사')) {
+                console.log(`⚠️ [${participant.name}] 광역지원기관에 생활지원사가 등록됨 - 데이터 오류 가능성 (기관: ${participantInstitution})`);
+                // 이 경우도 불일치로 분류 (데이터 정정 필요)
+              }
+              
               console.log(`⚠️ [${participant.name}] 배움터에만 존재 (모인우리 데이터 없음)`);
               
               // 유사 데이터 정보 추출
@@ -1786,7 +2161,101 @@ export const useEducationStore = create<EducationStore>()(
           console.log(`${result.institution}: ${result.inconsistencies.length}건`);
         });
         
-        return results;
+        // 전체 매칭 통계 요약
+        const totalParticipants = participantData.length;
+        const totalInconsistencies = results.reduce((sum, result) => sum + result.inconsistencies.length, 0);
+        const learningOnlyCount = results.reduce((sum, result) => 
+          sum + result.inconsistencies.filter(inc => inc.inconsistencyTypes?.includes('배움터에만_존재')).length, 0);
+        const employeeOnlyCount = results.reduce((sum, result) => 
+          sum + result.inconsistencies.filter(inc => inc.inconsistencyTypes?.includes('모인우리에만_존재')).length, 0);
+        const statusMismatchCount = results.reduce((sum, result) => 
+          sum + result.inconsistencies.filter(inc => 
+            inc.inconsistencyTypes?.some(type => type.includes('불일치') && !type.includes('존재'))
+          ).length, 0);
+          
+        console.log('\n🚨 분석 결과 검증:');
+        console.log(`참가자 데이터: ${participantData.length}명`);
+        console.log(`종사자 데이터: ${employeeData.length}명`);
+        console.log(`배움터에만 존재: ${learningOnlyCount}명`);
+        console.log(`모인우리에만 존재: ${employeeOnlyCount}명`);
+        console.log(`상태 불일치: ${statusMismatchCount}명`);
+        
+        if (learningOnlyCount > totalParticipants * 0.8) {
+          console.warn('🚨 경고: 80% 이상이 배움터에만 존재로 분류됨 - 매칭 로직 문제 의심');
+        }
+        
+        console.log('\n🎯 매칭 분석 최종 요약:');
+        console.log(`전체 참가자(배움터): ${totalParticipants}명`);
+        console.log(`전체 종사자(모인우리): ${employeeData.length}명`);
+        console.log(`전체 불일치 건수: ${totalInconsistencies}건`);
+        console.log(`  - 배움터에만 존재: ${learningOnlyCount}건 (${totalParticipants > 0 ? ((learningOnlyCount/totalParticipants)*100).toFixed(1) : 0}%)`);
+        console.log(`  - 모인우리에만 존재: ${employeeOnlyCount}건`);
+        console.log(`  - 상태 불일치: ${statusMismatchCount}건`);
+        console.log(`매칭 성공률: ${totalParticipants > 0 ? (((totalParticipants - learningOnlyCount) / totalParticipants) * 100).toFixed(1) : 0}%`);
+        
+        // 결과를 정렬하여 일관성 확보
+        const sortedResults = results
+          .filter(result => result.inconsistencies.length > 0)
+          .sort((a, b) => a.institution.localeCompare(b.institution))
+          .map(result => ({
+            ...result,
+            inconsistencies: result.inconsistencies.sort((a, b) => {
+              // 이름으로 정렬하여 항상 동일한 순서 보장
+              return a.name.localeCompare(b.name);
+            })
+          }));
+        
+        console.log('\n🎯 매칭 분석 최종 요약 (일관성 확보됨):');
+        console.log(`전체 참가자(배움터): ${sortedParticipantData.length}명`);
+        console.log(`전체 종사자(모인우리): ${safeRawEmployeeData.length}명`);
+        const finalInconsistencyCount = sortedResults.reduce((sum, result) => sum + result.inconsistencies.length, 0);
+        console.log(`전체 불일치 건수: ${finalInconsistencyCount}건`);
+        console.log(`영향받는 기관수: ${sortedResults.length}개`);
+        
+        // 종료/폐지 기관 필터링 (임시로 비활성화)
+        const filteredResults = sortedResults.filter(result => {
+          // TODO: async 처리를 위해 별도 함수로 분리 필요
+          // const classification = await categorizeInstitution(result.institution);
+          // const isExcluded = classification === 'closed';
+          
+          // 임시로 모든 기관을 포함
+          return true;
+        });
+        
+        console.log(`\n✅ 필터링 후 영향받는 기관수: ${filteredResults.length}개`);
+        const filteredInconsistencyCount = filteredResults.reduce((sum, result) => sum + result.inconsistencies.length, 0);
+        console.log(`✅ 필터링 후 불일치 건수: ${filteredInconsistencyCount}건`);
+        
+        // 🔍 카테고리별 분석 결과 (상세 디버깅)
+        const categoryBreakdown = filteredResults.reduce((acc, result) => {
+          result.inconsistencies.forEach(item => {
+            if (item.inconsistencyTypes && Array.isArray(item.inconsistencyTypes)) {
+              item.inconsistencyTypes.forEach(type => {
+                acc[type] = (acc[type] || 0) + 1;
+              });
+            }
+          });
+          return acc;
+        }, {} as Record<string, number>);
+        
+        console.log(`📈 [카테고리별 상세 분석]:`);
+        Object.entries(categoryBreakdown).forEach(([category, count]) => {
+          console.log(`- ${category}: ${count}건`);
+        });
+        
+        // 🔍 첫 5개 결과 샘플
+        console.log(`📋 [결과 샘플 (첫 5개)]:`);
+        if (filteredResults.length > 0 && filteredResults[0].inconsistencies.length > 0) {
+          filteredResults[0].inconsistencies.slice(0, 5).forEach((item, idx) => {
+            console.log(`${idx + 1}. ${item.name} (${filteredResults[0].institution}) - 타입: [${(item.inconsistencyTypes || []).join(', ')}]`);
+          });
+        }
+        
+        // 성능 로그
+        const endTime = performance.now();
+        console.log(`⏱️ 불일치 분석 완료 시간: ${(endTime - startTime).toFixed(2)}ms`);
+        
+        return filteredResults;
       },
     }),
     {

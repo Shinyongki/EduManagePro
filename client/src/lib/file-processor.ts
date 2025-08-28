@@ -123,7 +123,7 @@ async function processEmployeeCSV(file: File): Promise<EmployeeData[]> {
             gender: parseGender(row['성별'] || row.gender),
             hireDate: parseDate(row['입사일'] || row.hireDate) || new Date(),
             resignDate: parseDate(row['퇴사일'] || row.resignDate),
-            isActive: !parseDate(row['퇴사일'] || row.resignDate),
+            isActive: !parseDate(row['퇴사일'] || row.resignDate) && parseDate(row['입사일'] || row.hireDate) !== undefined,
             workDays: calculateWorkDays(
               parseDate(row['입사일'] || row.hireDate),
               parseDate(row['퇴사일'] || row.resignDate)
@@ -158,7 +158,7 @@ async function processEmployeeExcel(file: File): Promise<EmployeeData[]> {
     gender: parseGender(row['성별'] || row.gender),
     hireDate: parseDate(row['입사일'] || row.hireDate) || new Date(),
     resignDate: parseDate(row['퇴사일'] || row.resignDate),
-    isActive: !parseDate(row['퇴사일'] || row.resignDate),
+    isActive: !parseDate(row['퇴사일'] || row.resignDate) && parseDate(row['입사일'] || row.hireDate) !== undefined,
     workDays: calculateWorkDays(
       parseDate(row['입사일'] || row.hireDate),
       parseDate(row['퇴사일'] || row.resignDate)
@@ -251,7 +251,7 @@ function parseGender(gender: string): '남' | '여' | undefined {
 }
 
 function parseDate(dateStr: string | undefined): Date | undefined {
-  if (!dateStr) return undefined;
+  if (!dateStr || dateStr.trim() === '' || dateStr === '0' || dateStr === 'null' || dateStr === 'undefined') return undefined;
   
   const date = new Date(dateStr);
   return isNaN(date.getTime()) ? undefined : date;

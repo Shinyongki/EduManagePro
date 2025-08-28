@@ -295,12 +295,12 @@ export const matchInstitution = (
   inst1: { code?: string; name?: string },
   inst2: { code?: string; name?: string }
 ): boolean => {
-  // 1. 코드가 둘 다 있으면 코드로 매칭
+  // 1. 코드가 둘 다 있으면 코드로 매칭 (최우선)
   if (inst1.code && inst2.code) {
     return isInstitutionCodeMatch(inst1.code, inst2.code);
   }
   
-  // 2. 이름으로 매칭
+  // 2. 이름으로 매칭 (코드가 없는 경우)
   return isInstitutionMatch(inst1.name, inst2.name);
 };
 
@@ -365,3 +365,151 @@ export const debugInstitutionMatch = (
     facility2: extractFacilityType(normalized2)
   };
 };
+
+// ===== 기관 분류 시스템 =====
+
+export interface InstitutionAnalysis {
+  totalInstitutions: number;
+  managedInstitutions: string[];
+  specifiedUnmanagedInstitutions: string[];
+  unmanagedInstitutions: string[];
+  closedInstitutions: string[];
+  summary: {
+    managed: number;
+    specifiedUnmanaged: number;
+    unmanaged: number;
+    closed: number;
+    target: number;
+  };
+}
+
+// 기관 분류 타입
+export type InstitutionCategory = 'managed' | 'specified-unmanaged' | 'unmanaged' | 'closed' | 'unknown';
+
+// 기관 분석 결과를 로드하는 함수
+let cachedAnalysis: InstitutionAnalysis | null = null;
+
+export async function loadInstitutionAnalysis(): Promise<InstitutionAnalysis | null> {
+  if (cachedAnalysis) {
+    return cachedAnalysis;
+  }
+
+  try {
+    const response = await fetch('/data/institution-analysis.json');
+    if (response.ok) {
+      cachedAnalysis = await response.json();
+      return cachedAnalysis;
+    }
+  } catch (error) {
+    console.warn('Failed to load institution analysis:', error);
+  }
+  
+  return null;
+}
+
+// 기관명을 통해 카테고리를 분류하는 함수
+export async function categorizeInstitution(institutionName: string): Promise<InstitutionCategory> {
+  const analysis = await loadInstitutionAnalysis();
+  
+  if (!analysis || !institutionName) {
+    return 'unknown';
+  }
+
+  // 정확히 매칭되는지 확인
+  if (analysis.managedInstitutions.includes(institutionName)) {
+    return 'managed';
+  }
+  
+  if (analysis.specifiedUnmanagedInstitutions?.includes(institutionName)) {
+    return 'specified-unmanaged';
+  }
+  
+  if (analysis.unmanagedInstitutions.includes(institutionName)) {
+    return 'unmanaged';
+  }
+  
+  if (analysis.closedInstitutions?.includes(institutionName)) {
+    return 'closed';
+  }
+
+  return 'unknown';
+}
+
+// 기관 목록을 카테고리별로 필터링하는 함수
+export async function filterInstitutionsByCategory(
+  institutions: string[], 
+  category: InstitutionCategory | InstitutionCategory[]
+): Promise<string[]> {
+  const analysis = await loadInstitutionAnalysis();
+  
+  if (!analysis) {
+    return institutions;
+  }
+
+  const categories = Array.isArray(category) ? category : [category];
+  const filtered: string[] = [];
+  
+  for (const institution of institutions) {
+    const institutionCategory = await categorizeInstitution(institution);
+    if (categories.includes(institutionCategory)) {
+      filtered.push(institution);
+    }
+  }
+  
+  return filtered;
+}
+
+// 관리 기관만 필터링
+export async function getManagedInstitutions(institutions: string[]): Promise<string[]> {
+  return filterInstitutionsByCategory(institutions, 'managed');
+}
+
+// 비관리 기관만 필터링
+export async function getUnmanagedInstitutions(institutions: string[]): Promise<string[]> {
+  return filterInstitutionsByCategory(institutions, ['specified-unmanaged', 'unmanaged']);
+}
+
+// 종료/폐지 기관 제외하고 필터링
+export async function getActiveInstitutions(institutions: string[]): Promise<string[]> {
+  return filterInstitutionsByCategory(institutions, ['managed', 'specified-unmanaged', 'unmanaged']);
+}
+
+// 기관 통계 정보 제공
+export async function getInstitutionStats(): Promise<InstitutionAnalysis['summary'] | null> {
+  const analysis = await loadInstitutionAnalysis();
+  return analysis?.summary || null;
+}
+
+// 캐시 리셋 (데이터 업데이트 시 사용)
+export function resetInstitutionAnalysisCache(): void {
+  cachedAnalysis = null;
+}
+
+// 퇴사자 필터링 함수 (근무종료 관련 문제 해결)
+export function filterActiveEmployees<T extends { 
+  isActive?: boolean; 
+  resignDate?: string | null; 
+  notes?: string;
+  remarks?: string;
+  note?: string;
+}>(employees: T[]): T[] {
+  return employees.filter(emp => {
+    // isActive가 명시적으로 false인 경우 제외
+    if (emp.isActive === false) {
+      return false;
+    }
+    
+    // 퇴사일이 있는 경우 제외
+    if (emp.resignDate && emp.resignDate.trim() !== '') {
+      return false;
+    }
+    
+    // 비고에 종료/퇴사 관련 키워드가 있는 경우 제외
+    const notes = [emp.notes, emp.remarks, emp.note].filter(Boolean).join(' ').toLowerCase();
+    if (notes.includes('종료') || notes.includes('퇴사') || notes.includes('퇴사함') || notes.includes('계약종료')) {
+      return false;
+    }
+    
+    return true;
+  });
+}

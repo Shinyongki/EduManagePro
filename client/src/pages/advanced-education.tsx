@@ -29,39 +29,65 @@ import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
 import { extractSido, extractSigungu } from "@/utils/institution-matcher";
 
-// Mock data structure for integrated analysis
+/**
+ * 데이터 소스별 역할 정의:
+ * 
+ * 1. 모인우리 시스템 (3,104명):
+ *    - employeeData: 종사자 기본 정보, 자격, 근속 정보
+ *    - institutionData: 기관별 현황 및 예산 정보  
+ *    - 담당 컬럼: A~H (자격현황, 근속현황, 예산지시 등록자 수)
+ * 
+ * 2. 배움터 시스템 (3,261명):
+ *    - participantData: 소속회원목록 정보
+ *    - basicEducationData: 기초교육 이수 현황
+ *    - advancedEducationData: 심화교육 이수 현황
+ *    - 담당 컬럼: I (직무교육 이수인원), 수강권리 등록자 수
+ * 
+ * 3. 별도 계산 방식:
+ *    - 시스템 간 매칭 시도하지 않음
+ *    - 각 시스템 데이터를 독립적으로 사용
+ *    - 기관코드 기준으로 그룹화만 수행
+ */
+
+// 종합 현황표 데이터 구조
 interface IntegratedAnalysisData {
   management: string;
   region: string;
   district: string;
   institutionCode: string;
   institutionName: string;
-  // 백업입력(수강권리 등록자 수)
-  backup1_total: number;
-  backup1_social: number;
-  backup1_life: number;
-  // 백업입력(예산지시 등록자 수) 
-  backup2_a: number;
-  backup2_b: number;
-  backup2_c: number;
-  backup2_total: number;
-  // D급 백업입력(수강권리 등록자 수)
-  dLevel_social: number;
-  dLevel_life: number;
-  dLevel_total: number;
-  // 근무자 자격현황
-  qualification_social: number;
-  qualification_life: number;
-  qualification_total: number;
-  // 근무자 근속현황
-  tenure_social: number;
-  tenure_life: number;
-  tenure_rate: number;
-  // 근무자 직무교육 이수율
-  education_f: number;
-  education_rate_fb: number;
-  education_warning: number;
-  education_g: number;
+  
+  // [배움터 시스템] 백업입력(수강권리 등록자 수) - 소속회원목록 기준
+  backup1_total: number;        // 전체 근무자(=O+@) 
+  backup1_social: number;       // 전문사회복지사 ①
+  backup1_life: number;         // 생활지원사회복지사 ②
+  
+  // [모인우리 시스템] 백업입력(예산지시 등록자 수) - 기관현황 기준
+  backup2_a: number;            // A 전체
+  backup2_b: number;            // B 전업사회복지사  
+  backup2_c: number;            // C 생활지원사
+  backup2_total: number;        // 전체 근무자(=@+@)
+  
+  // [배움터 시스템] D급 백업입력(수강권리 등록자 수) - 소속회원목록 기준
+  dLevel_social: number;        // 전문사회복지사 ①
+  dLevel_life: number;          // 생활지원사 ②
+  dLevel_total: number;         // D 전체
+  
+  // [모인우리 시스템] (1-1.) 근무자 자격현황 - 종사자데이터 기준
+  qualification_social: number;  // 전업사회복지사
+  qualification_life: number;    // 생활지원사
+  qualification_total: number;   // 자격취득(=@+@)
+  
+  // [모인우리 시스템] (1-1.a) 근무자 근속현황 - 종사자데이터 기준
+  tenure_social: number;        // 전문사회복지사 ①
+  tenure_life: number;          // 생활지원사 ②  
+  tenure_rate: number;          // (E/A) 재응률
+  
+  // [배움터 시스템] (1-4.) 근무자 직무교육 이수율 - 교육데이터 기준
+  education_f: number;          // F 재응률
+  education_rate_fb: number;    // (F/B) 재응률
+  education_warning: number;    // (경고) 총험률
+  education_g: number;          // G 재응관관(G/C) 재응률(경고) 총험률
 }
 
 export default function AdvancedEducationPage() {

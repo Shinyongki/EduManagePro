@@ -41,6 +41,14 @@ import {
   calculateEducationStats,
   getActivePersons 
 } from "@/utils/unified-data-source";
+import { 
+  categorizeInstitution, 
+  getActiveInstitutions, 
+  getManagedInstitutions,
+  getUnmanagedInstitutions,
+  loadInstitutionAnalysis,
+  type InstitutionCategory 
+} from "@/utils/institution-matcher";
 
 export default function ParticipantsPage() {
   const [showUploadSection, setShowUploadSection] = useState(false);
@@ -264,6 +272,7 @@ export default function ParticipantsPage() {
     getEducationSummaryStats,
     getDataInconsistencies,
     loadLazyData,
+    forceReloadData,
     isLoaded,
     employeeData,
     setEmployeeData,
@@ -317,10 +326,10 @@ export default function ParticipantsPage() {
   // 종사자 데이터 재로딩 체크 (데이터가 비어있는 경우)
   useEffect(() => {
     if (isLoaded?.employee && (!employeeData || !Array.isArray(employeeData) || employeeData.length === 0)) {
-      console.log('⚠️ 종사자 데이터가 로드되었지만 비어있음, 재로딩 시도...');
-      loadLazyData('employee');
+      console.log('⚠️ 종사자 데이터가 로드되었지만 비어있음, forceReload 시도...');
+      forceReloadData('employee');
     }
-  }, [isLoaded?.employee, employeeData]);
+  }, [isLoaded?.employee, employeeData, forceReloadData]);
 
   // API 호출 비활성화 - IndexedDB 데이터만 사용
   // useEffect(() => {
@@ -577,46 +586,120 @@ export default function ParticipantsPage() {
   // 기존 로직도 유지 (비교용)
   const allParticipantStatusList = useMemo(() => getAllParticipantEducationStatus(), [participantData, getAllParticipantEducationStatus]);
   const summaryStats = useMemo(() => getEducationSummaryStats(), [participantData, getEducationSummaryStats]);
-  // 🔍 Lazy load inconsistency analysis only when needed
+  
+  // 🔍 Cached inconsistency analysis for better performance
   const [inconsistencyData, setInconsistencyData] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
   
-  const loadInconsistencyAnalysis = useCallback(async () => {
-    if (!employeeData || !Array.isArray(employeeData) || employeeData.length === 0) {
-      console.warn('❌ Cannot run inconsistency analysis: no employee data available');
-      return;
-    }
-    
-    console.log('🔍 Starting inconsistency analysis with:', employeeData.length, 'employees');
-    setIsAnalyzing(true);
-    
-    // Use requestIdleCallback for better performance, fallback to setTimeout
-    const runAnalysis = () => {
-      try {
-        const result = getDataInconsistencies(employeeData);
-        console.log('✅ Inconsistency analysis completed:', result.length, 'institutions with issues');
-        setInconsistencyData(result);
-      } catch (error) {
-        console.error('❌ Inconsistency analysis failed:', error);
-        setInconsistencyData([]);
-      } finally {
-        setIsAnalyzing(false);
-      }
-    };
-
-    if (window.requestIdleCallback) {
-      window.requestIdleCallback(runAnalysis, { timeout: 5000 });
-    } else {
-      setTimeout(runAnalysis, 100);
-    }
-  }, [employeeData, getDataInconsistencies]);
-  
-  // Only run analysis when inconsistency tab is accessed
+  // Reset analysis cache when employee data changes
   useEffect(() => {
-    if (activeTab === 'inconsistencies' && !isAnalyzing) {
-      loadInconsistencyAnalysis();
+    setHasAnalyzed(false);
+    setInconsistencyData([]);
+  }, [employeeData?.length]);
+  
+  // Load analysis only when inconsistency tab is accessed
+  useEffect(() => {
+    // Only run when inconsistencies tab is active and we haven't analyzed yet
+    if (activeTab === 'inconsistencies' && !hasAnalyzed && !isAnalyzing) {
+      // Check if employee data is available and loaded
+      if (isLoaded?.employee && employeeData && Array.isArray(employeeData) && employeeData.length > 0) {
+        console.log('🚀 Starting inconsistency analysis for', employeeData.length, 'employees');
+        setIsAnalyzing(true);
+        
+        // Use requestIdleCallback for better performance
+        const performAnalysis = () => {
+          console.log('🎯 performAnalysis 함수 시작됨');
+          try {
+            console.log('🔍 Computing inconsistency analysis...');
+            console.log('📊 Employee data length:', employeeData.length);
+            console.log('📊 Employee data sample:', employeeData.slice(0, 2));
+            
+            const result = getDataInconsistencies(employeeData);
+            console.log('✅ Analysis completed:', result.length, 'institutions with issues');
+            
+            setInconsistencyData(result);
+            setHasAnalyzed(true);
+          } catch (error) {
+            console.error('❌ Error during inconsistency analysis:', error);
+            console.error('❌ Error stack:', error.stack);
+            setInconsistencyData([]);
+            setHasAnalyzed(true);
+          } finally {
+            console.log('🏁 performAnalysis 완료 - setIsAnalyzing(false) 호출');
+            setIsAnalyzing(false);
+          }
+        };
+
+        // Use a simple timeout to avoid requestIdleCallback issues with timeout protection
+        const timeoutId = setTimeout(() => {
+          if (isAnalyzing) {
+            console.warn('⏰ Analysis timeout - forcing completion');
+            setIsAnalyzing(false);
+            setHasAnalyzed(true);
+            setInconsistencyData([]);
+          }
+        }, 30000); // 30초 타임아웃
+        
+        setTimeout(() => {
+          performAnalysis();
+          clearTimeout(timeoutId);
+        }, 100);
+      } else {
+        console.log('⚠️ Employee data not ready for inconsistency analysis');
+        console.log('📊 Employee data state:', { 
+          isLoaded: !!isLoaded?.employee,
+          exists: !!employeeData, 
+          isArray: Array.isArray(employeeData), 
+          length: employeeData?.length || 0 
+        });
+        
+        // If employee data is still loading, don't mark as analyzed yet
+        if (!isLoaded?.employee || !employeeData || employeeData.length === 0) {
+          console.log('🔄 Employee data not ready, loading directly from API...');
+          
+          // 즉시 API에서 데이터 로딩 (다시 분석하기와 동일한 로직)
+          fetch('/api/employees?limit=10000&page=1&all=true')
+            .then(response => {
+              if (response.ok) {
+                return response.json();
+              }
+              throw new Error('API request failed');
+            })
+            .then(apiData => {
+              let employees = [];
+              if (Array.isArray(apiData)) {
+                employees = apiData;
+              } else if (Array.isArray(apiData.data)) {
+                employees = apiData.data;
+              } else if (Array.isArray(apiData.employees)) {
+                employees = apiData.employees;
+              }
+              
+              if (employees.length > 0) {
+                console.log('✅ API에서 직접 종사자 데이터 로드:', employees.length, '명');
+                const result = getDataInconsistencies(employees);
+                setInconsistencyData(result);
+                setHasAnalyzed(true);
+                setIsAnalyzing(false);
+              }
+            })
+            .catch(error => {
+              console.error('❌ API 직접 로딩 실패:', error);
+              setIsAnalyzing(false);
+            });
+          
+          return;
+        }
+        
+        // No employee data available - mark as analyzed to stop loading
+        console.log('🔄 No employee data available, stopping analysis');
+        setIsAnalyzing(false);
+        setHasAnalyzed(true);
+        setInconsistencyData([]);
+      }
     }
-  }, [activeTab, loadInconsistencyAnalysis]);
+  }, [activeTab, hasAnalyzed, isAnalyzing, employeeData, isLoaded?.employee]);
   
   // Optimized filtering with better performance
   const filteredData = useMemo(() => {
@@ -779,7 +862,7 @@ export default function ParticipantsPage() {
 
         <TabsContent value="list" className="mt-6 space-y-6">
           {/* 데이터 업로드 섹션 - 접을 수 있는 UI */}
-          <Collapsible defaultOpen={!participantData || participantData.length === 0}>
+          <Collapsible defaultOpen={false}>
             <Card>
               <CardHeader>
                 <CollapsibleTrigger className="flex items-center justify-between w-full hover:opacity-80 transition-opacity">
@@ -1412,8 +1495,78 @@ export default function ParticipantsPage() {
                     )}
                   </div>
 
-                  <div className="text-sm text-gray-600">
-                    <strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-600">
+                      <strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.
+                    </div>
+                    
+                    {/* 항상 사용 가능한 재분석 버튼 */}
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={async () => {
+                          console.log('🚀 Manual re-analysis with API data');
+                          setIsAnalyzing(true);
+                          setHasAnalyzed(false);
+                          
+                          try {
+                            // API에서 직접 종사자 데이터 가져오기 (전체 데이터 요청)
+                            const response = await fetch('/api/employees?limit=10000&page=1&all=true');
+                            if (response.ok) {
+                              const apiData = await response.json();
+                              console.log('🔍 API 응답 구조:', apiData);
+                              console.log('🔍 apiData.data 타입:', typeof apiData.data);
+                              console.log('🔍 apiData.data 길이:', Array.isArray(apiData.data) ? apiData.data.length : 'Not array');
+                              
+                              // 다양한 구조 시도
+                              let employees = [];
+                              if (Array.isArray(apiData)) {
+                                employees = apiData;
+                                console.log('📊 직접 배열 사용:', employees.length, 'employees');
+                              } else if (Array.isArray(apiData.data)) {
+                                employees = apiData.data;
+                                console.log('📊 apiData.data 사용:', employees.length, 'employees');
+                              } else if (Array.isArray(apiData.employees)) {
+                                employees = apiData.employees;
+                                console.log('📊 apiData.employees 사용:', employees.length, 'employees');
+                              } else {
+                                console.error('❌ 알 수 없는 API 응답 구조');
+                              }
+                              
+                              if (employees.length > 0) {
+                                // API 데이터로 직접 분석 실행
+                                const result = getDataInconsistencies(employees);
+                                setInconsistencyData(result);
+                                setHasAnalyzed(true);
+                                console.log('✅ Manual analysis completed:', result.length, 'institutions');
+                              } else {
+                                throw new Error('No employee data from API');
+                              }
+                            } else {
+                              throw new Error('API request failed');
+                            }
+                          } catch (error) {
+                            console.error('❌ Manual analysis failed:', error);
+                            setInconsistencyData([]);
+                            setHasAnalyzed(true);
+                          } finally {
+                            setIsAnalyzing(false);
+                          }
+                        }}
+                        className="bg-blue-100 hover:bg-blue-200 text-blue-800"
+                        disabled={isAnalyzing}
+                      >
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        다시 분석하기
+                      </Button>
+                      
+                      {/* 종사자 데이터 로딩 상태 표시 */}
+                      <div className="flex items-center text-xs text-gray-500">
+                        종사자 데이터: {isLoaded?.employee ? '✅ 로드됨' : '⏳ 로딩중'} 
+                        ({employeeData?.length || 0}명)
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="bg-blue-50 p-3 rounded-md">
@@ -1437,8 +1590,25 @@ export default function ParticipantsPage() {
                     <div>
                       <div className="text-lg font-medium text-blue-600">불일치 분석 진행 중...</div>
                       <div className="text-sm text-gray-500">데이터를 분석하고 있습니다. 잠시만 기다려 주세요.</div>
+                      <div className="text-xs text-gray-400 mt-2">
+                        종사자 데이터: {employeeData?.length || 0}개 | 분석됨: {hasAnalyzed ? '예' : '아니오'}
+                      </div>
                     </div>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      console.log('🔄 Forcing analysis reset...');
+                      setIsAnalyzing(false);
+                      setHasAnalyzed(false);
+                      setInconsistencyData([]);
+                    }}
+                    className="mt-4"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    분석 재시작
+                  </Button>
                 </div>
               ) : inconsistencyData.length === 0 ? (
                 <div className="text-center py-8">
@@ -1533,6 +1703,153 @@ export default function ParticipantsPage() {
                       <div className="text-sm text-muted-foreground">거제 관련 기관</div>
                     </Card>
                   </div>
+
+                  {/* 📋 기관별 불일치 개요 테이블 */}
+                  <Card id="inconsistency-overview" className="border-l-4 border-l-blue-500">
+                    <CardHeader>
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Eye className="h-5 w-5 text-blue-600" />
+                        기관별 불일치 현황 개요
+                        <Badge variant="outline" className="ml-2">
+                          {inconsistencyData.length}개 기관
+                        </Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        각 기관을 클릭하면 해당 기관의 상세 불일치 내역으로 이동합니다.
+                        <br />
+                        <span className="text-sm text-amber-600 font-medium">
+                          ⚠️ 총 불일치는 고유한 항목 수이며, 각 카테고리별 합계와 다를 수 있습니다 (한 항목이 여러 카테고리에 해당될 수 있음)
+                        </span>
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="border border-gray-200 rounded-lg">
+                        {/* 고정 헤더 */}
+                        <div className="bg-white border-b-2 border-gray-300 rounded-t-lg">
+                          <div className="grid grid-cols-8 gap-0 px-3 py-4 text-sm font-semibold">
+                            <div className="text-left">기관명</div>
+                            <div className="text-center">총 불일치</div>
+                            <div className="text-center bg-red-50 px-2 py-1 rounded">배움터만 존재</div>
+                            <div className="text-center bg-blue-50 px-2 py-1 rounded">모인우리만 존재</div>
+                            <div className="text-center bg-orange-50 px-2 py-1 rounded">상태 모순</div>
+                            <div className="text-center bg-yellow-50 px-2 py-1 rounded">퇴사일 불일치</div>
+                            <div className="text-center bg-purple-50 px-2 py-1 rounded">소속기관 불일치</div>
+                            <div className="text-center">이동</div>
+                          </div>
+                        </div>
+                        
+                        {/* 스크롤 가능한 데이터 영역 */}
+                        <div className="overflow-auto max-h-[500px]">
+                          <div className="space-y-0">
+                            {inconsistencyData.map((institutionData, instIndex) => {
+                              const learningOnlyCount = institutionData.inconsistencies.filter(inc => 
+                                inc.type === '배움터에만_존재' || 
+                                (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('배움터에만_존재'))
+                              ).length;
+                              
+                              const employeeOnlyCount = institutionData.inconsistencies.filter(inc => 
+                                inc.type === '모인우리에만_존재' || 
+                                (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('모인우리에만_존재'))
+                              ).length;
+                              
+                              const statusMismatchCount = institutionData.inconsistencies.filter(inc => 
+                                inc.type?.includes('상태') || 
+                                (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('상태모순_불일치'))
+                              ).length;
+                              
+                              const resignDateMismatchCount = institutionData.inconsistencies.filter(inc => 
+                                inc.type?.includes('퇴사일') || 
+                                (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('퇴사일_불일치'))
+                              ).length;
+                              
+                              const institutionMismatchCount = institutionData.inconsistencies.filter(inc => 
+                                inc.type?.includes('소속기관') || 
+                                (inc.inconsistencyTypes && inc.inconsistencyTypes.includes('소속기관_불일치'))
+                              ).length;
+                              
+                              return (
+                                <div key={instIndex} className="grid grid-cols-8 gap-0 px-3 py-3 hover:bg-gray-50 border-b border-gray-100 items-center">
+                                  <div className="font-medium text-sm">
+                                    {institutionData.institution}
+                                  </div>
+                                  <div className="text-center">
+                                    <Badge variant="destructive" className="px-2 py-1 text-xs">
+                                      {institutionData.inconsistencies.length}
+                                    </Badge>
+                                  </div>
+                                  <div className="text-center">
+                                    {learningOnlyCount > 0 ? (
+                                      <Badge variant="secondary" className="bg-red-100 text-red-700 hover:bg-red-200 text-xs px-2 py-1">
+                                        {learningOnlyCount}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">0</span>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    {employeeOnlyCount > 0 ? (
+                                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 hover:bg-blue-200 text-xs px-2 py-1">
+                                        {employeeOnlyCount}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">0</span>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    {statusMismatchCount > 0 ? (
+                                      <Badge variant="secondary" className="bg-orange-100 text-orange-700 hover:bg-orange-200 text-xs px-2 py-1">
+                                        {statusMismatchCount}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">0</span>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    {resignDateMismatchCount > 0 ? (
+                                      <Badge variant="secondary" className="bg-yellow-100 text-yellow-700 hover:bg-yellow-200 text-xs px-2 py-1">
+                                        {resignDateMismatchCount}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">0</span>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    {institutionMismatchCount > 0 ? (
+                                      <Badge variant="secondary" className="bg-purple-100 text-purple-700 hover:bg-purple-200 text-xs px-2 py-1">
+                                        {institutionMismatchCount}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-gray-400 text-xs">0</span>
+                                    )}
+                                  </div>
+                                  <div className="text-center">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        console.log(`🔍 이동 버튼 클릭: institution-${instIndex}`);
+                                        const element = document.getElementById(`institution-${instIndex}`);
+                                        console.log(`🔍 대상 요소 찾음:`, element);
+                                        if (element) {
+                                          console.log(`🔍 스크롤 시작`);
+                                          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                        } else {
+                                          console.error(`❌ 요소를 찾을 수 없음: institution-${instIndex}`);
+                                        }
+                                      }}
+                                      className="h-7 px-2 text-xs"
+                                    >
+                                      이동
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
                   {/* 불일치 유형별 필터 버튼 */}
                   <div className="flex flex-wrap gap-2 p-4 bg-gray-50 rounded-lg">
@@ -1713,13 +2030,29 @@ export default function ParticipantsPage() {
                       return inst.inconsistencies.length > 0;
                     })
                     .map((institutionData, instIndex) => (
-                    <Card key={instIndex} className="border-l-4 border-l-orange-400">
+                    <Card key={instIndex} id={`institution-${instIndex}`} className="border-l-4 border-l-orange-400">
                       <CardHeader>
                         <CardTitle className="text-lg flex items-center justify-between">
                           <span>{highlightText(institutionData.institution, inconsistencySearchTerm)}</span>
-                          <Badge variant="destructive" className="ml-2">
-                            {institutionData.inconsistencies.length}건 불일치
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="destructive" className="ml-2">
+                              {institutionData.inconsistencies.length}건 불일치
+                            </Badge>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const element = document.getElementById('inconsistency-overview');
+                                if (element) {
+                                  element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                }
+                              }}
+                              className="h-8 px-3 text-xs"
+                              title="개요로 돌아가기"
+                            >
+                              ↑ 개요
+                            </Button>
+                          </div>
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
@@ -1833,6 +2166,23 @@ export default function ParticipantsPage() {
                               ))}
                             </TableBody>
                           </Table>
+                        </div>
+                        
+                        {/* 기관별 하단 돌아가기 버튼 */}
+                        <div className="mt-6 pt-4 border-t border-gray-200 flex justify-center">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const element = document.getElementById('inconsistency-overview');
+                              if (element) {
+                                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }
+                            }}
+                            className="flex items-center gap-2"
+                          >
+                            ↑ 개요로 돌아가기
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>

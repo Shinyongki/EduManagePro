@@ -103,7 +103,20 @@ export const useEmployeeStore = create<EmployeeStore>()(
         // IndexedDB에서 먼저 시도
         const { IndexedDBStorage } = await import('@/lib/indexeddb');
         const educationDB = new IndexedDBStorage();
-        let employeeData = await educationDB.getItem<EmployeeData[]>('employeeData');
+        let rawData = await educationDB.getItem<any>('employeeData');
+        
+        // API 응답 구조 또는 직접 배열 모두 처리
+        let employeeData: EmployeeData[] = [];
+        if (rawData) {
+          if (Array.isArray(rawData)) {
+            employeeData = rawData;
+          } else if (rawData.data && Array.isArray(rawData.data)) {
+            console.log('📦 IndexedDB에서 API 응답 구조 감지, data 배열 추출');
+            employeeData = rawData.data;
+          } else {
+            console.warn('⚠️ IndexedDB 데이터가 예상과 다른 구조:', typeof rawData);
+          }
+        }
         
         if (!employeeData || employeeData.length === 0) {
           console.log('📡 IndexedDB에 종사자 데이터 없음, 서버에서 가져오기...');
