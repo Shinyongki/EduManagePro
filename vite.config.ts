@@ -27,6 +27,20 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      // Node.js 모듈 polyfill 완전 비활성화
+      external: ['path', 'fs', 'os', 'crypto', 'util', 'events', 'stream', 'buffer', 'url'],
+    },
+  },
+  define: {
+    // Node.js 전역 변수 제거
+    global: 'globalThis',
+    process: '{}',
+    Buffer: '{}',
+  },
+  optimizeDeps: {
+    // Node.js 모듈 최적화에서 제외
+    exclude: ['path', 'fs', 'os', 'crypto', 'util', 'events', 'stream', 'buffer', 'url']
   },
   server: {
     fs: {
