@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import MainLayout from "@/components/layout/main-layout";
 import Dashboard from "@/pages/dashboard";
+import ComprehensiveMap from "@/pages/comprehensive-map";
 import ParticipantsPage from "@/pages/participants";
 import BasicEducationPage from "@/pages/basic-education";
 import AdvancedEducationPage from "@/pages/advanced-education";
@@ -20,6 +21,7 @@ function Router() {
     <MainLayout>
       <Switch>
         <Route path="/" component={Dashboard} />
+        <Route path="/comprehensive-map" component={ComprehensiveMap} />
         <Route path="/participants" component={ParticipantsPage} />
         <Route path="/basic-education" component={BasicEducationPage} />
         <Route path="/advanced-education" component={AdvancedEducationPage} />

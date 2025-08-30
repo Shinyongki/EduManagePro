@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { MapContainer, TileLayer, Polygon, Tooltip, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -25,6 +25,7 @@ interface GyeongsangnamMapProps {
   colorScheme?: 'blue' | 'green' | 'red' | 'purple' | 'orange';
   title?: string;
   height?: string;
+  onDistrictClick?: (districtName: string) => void;
 }
 
 export default function GyeongsangnamMap({ 
@@ -32,39 +33,45 @@ export default function GyeongsangnamMap({
   showLabels = true,
   colorScheme = 'blue',
   title,
-  height = '500px'
+  height = '500px',
+  onDistrictClick
 }: GyeongsangnamMapProps) {
-  // 색상 스키마 정의
+  // 색상 스키마 정의 - 더 뚜렷한 대비
   const colorSchemes = {
     blue: {
-      high: '#1e40af',
-      medium: '#3b82f6',
-      low: '#93c5fd',
-      none: '#e5e7eb'
+      high: '#0c4a6e',    // 진한 파란색
+      medium: '#0ea5e9',  // 중간 파란색
+      low: '#bae6fd',     // 연한 파란색
+      veryLow: '#e0f2fe', // 매우 연한 파란색
+      none: '#f1f5f9'     // 회색
     },
     green: {
-      high: '#14532d',
-      medium: '#22c55e',
-      low: '#86efac',
-      none: '#e5e7eb'
+      high: '#14532d',    // 진한 초록색
+      medium: '#16a34a',  // 중간 초록색
+      low: '#86efac',     // 연한 초록색
+      veryLow: '#dcfce7', // 매우 연한 초록색
+      none: '#f1f5f9'
     },
     red: {
-      high: '#7f1d1d',
-      medium: '#ef4444',
-      low: '#fca5a5',
-      none: '#e5e7eb'
+      high: '#7f1d1d',    // 진한 빨간색
+      medium: '#dc2626',  // 중간 빨간색
+      low: '#fca5a5',     // 연한 빨간색
+      veryLow: '#fee2e2', // 매우 연한 빨간색
+      none: '#f1f5f9'
     },
     purple: {
-      high: '#581c87',
-      medium: '#a855f7',
-      low: '#d8b4fe',
-      none: '#e5e7eb'
+      high: '#581c87',    // 진한 보라색
+      medium: '#9333ea',  // 중간 보라색
+      low: '#d8b4fe',     // 연한 보라색
+      veryLow: '#f3e8ff', // 매우 연한 보라색
+      none: '#f1f5f9'
     },
     orange: {
-      high: '#7c2d12',
-      medium: '#fb923c',
-      low: '#fed7aa',
-      none: '#e5e7eb'
+      high: '#7c2d12',    // 진한 주황색
+      medium: '#ea580c',  // 중간 주황색
+      low: '#fdba74',     // 연한 주황색
+      veryLow: '#fed7aa', // 매우 연한 주황색
+      none: '#f1f5f9'
     }
   };
 
@@ -206,7 +213,7 @@ export default function GyeongsangnamMap({
     return data.find(d => d.district === districtName);
   };
 
-  // 색상 결정 함수
+  // 상대적 기준으로 색상 결정 함수
   const getColor = (districtData?: MapData) => {
     if (!districtData || districtData.value === undefined) {
       return colors.none;
@@ -217,11 +224,27 @@ export default function GyeongsangnamMap({
       return districtData.color;
     }
     
-    // 값에 따른 색상 결정 (0-33: low, 34-66: medium, 67-100: high)
+    // 데이터가 있는 지역들의 값만 추출 (0보다 큰 값만)
+    const validValues = data.filter(d => d.value !== undefined && d.value! > 0).map(d => d.value!);
+    if (validValues.length === 0) return colors.none;
+    
+    // 최소값과 최대값 계산
+    const minValue = Math.min(...validValues);
+    const maxValue = Math.max(...validValues);
+    const range = maxValue - minValue;
+    
+    // 범위가 0인 경우 (모든 값이 같은 경우)
+    if (range === 0) return colors.medium;
+    
+    // 현재 값의 상대적 위치 계산 (0~1 사이)
     const value = districtData.value;
-    if (value <= 33) return colors.low;
-    if (value <= 66) return colors.medium;
-    return colors.high;
+    const normalizedValue = (value - minValue) / range;
+    
+    // 4단계로 구분 (상위 25%, 25-50%, 50-75%, 하위 25%)
+    if (normalizedValue >= 0.75) return colors.high;      // 상위 25%
+    if (normalizedValue >= 0.5) return colors.medium;     // 25-50%
+    if (normalizedValue >= 0.25) return colors.low;       // 50-75%
+    return colors.veryLow;                                // 하위 25%
   };
 
   return (
@@ -230,14 +253,17 @@ export default function GyeongsangnamMap({
         <div style={{
           position: 'absolute',
           top: '10px',
-          left: '10px',
-          background: 'white',
-          padding: '8px 12px',
-          borderRadius: '6px',
-          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(255, 255, 255, 0.95)',
+          padding: '8px 16px',
+          borderRadius: '8px',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
           zIndex: 1000,
-          fontSize: '14px',
-          fontWeight: 'bold'
+          fontSize: '13px',
+          fontWeight: 'bold',
+          border: '1px solid rgba(0,0,0,0.1)',
+          backdropFilter: 'blur(4px)'
         }}>
           {title}
         </div>
@@ -246,9 +272,16 @@ export default function GyeongsangnamMap({
       <MapContainer
         center={[35.2594, 128.6641]} // 경상남도 중심
         zoom={8}
+        minZoom={6}
+        maxZoom={14}
         style={{ height: '100%', width: '100%', borderRadius: '8px' }}
         scrollWheelZoom={true}
         zoomControl={true}
+        doubleClickZoom={true}
+        touchZoom={true}
+        keyboard={true}
+        wheelDebounceTime={40}
+        wheelPxPerZoomLevel={60}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -266,11 +299,18 @@ export default function GyeongsangnamMap({
               key={index}
               positions={district.coordinates as [number, number][]}
               pathOptions={{
-                fillColor: fillColor,
-                fillOpacity: hasData ? 0.6 : 0.2,
-                color: hasData ? colors.high : '#6b7280',
-                weight: hasData ? 3 : 2,
-                opacity: 1
+                fillColor: 'transparent',
+                fillOpacity: 0,
+                color: hasData ? '#374151' : '#9ca3af',
+                weight: hasData ? 2 : 1,
+                opacity: 0.8
+              }}
+              eventHandlers={{
+                click: () => {
+                  if (onDistrictClick) {
+                    onDistrictClick(district.name);
+                  }
+                }
               }}
             >
               {showLabels && (
@@ -279,16 +319,37 @@ export default function GyeongsangnamMap({
                     textAlign: 'center',
                     fontWeight: 'bold',
                     fontSize: '11px',
-                    padding: '2px 4px',
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                    borderRadius: '4px',
-                    border: hasData ? `2px solid ${colors.medium}` : '1px solid #9ca3af'
+                    padding: '4px 6px',
+                    backgroundColor: hasData ? fillColor : 'rgba(241, 245, 249, 0.95)',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(0, 0, 0, 0.15)',
+                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.15)',
+                    backdropFilter: 'blur(4px)',
+                    minWidth: '60px'
                   }}>
-                    <div style={{ color: hasData ? colors.high : '#4b5563' }}>
-                      {district.name}
+                    <div style={{ 
+                      color: hasData && fillColor !== colors.veryLow && fillColor !== colors.low ? 'white' : '#1f2937',
+                      textShadow: hasData && fillColor !== colors.veryLow && fillColor !== colors.low ? '0 1px 2px rgba(0, 0, 0, 0.3)' : 'none',
+                      fontSize: '10px',
+                      lineHeight: '1.2',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '2px',
+                      justifyContent: 'center'
+                    }}>
+                      <span>{district.name}</span>
+                      {districtData && districtData.hasAllocationDifference && (
+                        <span style={{ color: '#eab308', fontSize: '8px' }}>★</span>
+                      )}
                     </div>
                     {districtData && districtData.label && (
-                      <div style={{ fontSize: '10px', color: colors.medium, marginTop: '1px' }}>
+                      <div style={{ 
+                        fontSize: '9px', 
+                        color: hasData && fillColor !== colors.veryLow && fillColor !== colors.low ? 'rgba(255, 255, 255, 0.9)' : '#6b7280',
+                        marginTop: '2px',
+                        fontWeight: 'bold',
+                        textShadow: hasData && fillColor !== colors.veryLow && fillColor !== colors.low ? '0 1px 1px rgba(0, 0, 0, 0.4)' : 'none'
+                      }}>
                         {districtData.label}
                       </div>
                     )}
@@ -296,65 +357,10 @@ export default function GyeongsangnamMap({
                 </Tooltip>
               )}
               
-              <Popup>
-                <div style={{ padding: '8px', textAlign: 'center' }}>
-                  <h4 style={{ margin: '0 0 4px 0', fontWeight: 'bold' }}>{district.name}</h4>
-                  {districtData ? (
-                    <>
-                      {districtData.value !== undefined && (
-                        <p style={{ margin: '0', fontSize: '14px', color: colors.high, fontWeight: 'bold' }}>
-                          값: {districtData.value}
-                        </p>
-                      )}
-                      {districtData.description && (
-                        <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#6b7280' }}>
-                          {districtData.description}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p style={{ margin: '0', fontSize: '12px', color: '#6b7280' }}>
-                      데이터 없음
-                    </p>
-                  )}
-                </div>
-              </Popup>
             </Polygon>
           );
         })}
       </MapContainer>
-      
-      {/* 범례 */}
-      <div style={{
-        position: 'absolute',
-        bottom: '10px',
-        right: '10px',
-        background: 'white',
-        padding: '8px',
-        borderRadius: '6px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        fontSize: '11px'
-      }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>범례</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <div style={{ width: '12px', height: '12px', backgroundColor: colors.high, opacity: 0.6 }}></div>
-            <span>높음</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <div style={{ width: '12px', height: '12px', backgroundColor: colors.medium, opacity: 0.6 }}></div>
-            <span>중간</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <div style={{ width: '12px', height: '12px', backgroundColor: colors.low, opacity: 0.6 }}></div>
-            <span>낮음</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <div style={{ width: '12px', height: '12px', backgroundColor: colors.none, opacity: 0.2 }}></div>
-            <span>데이터 없음</span>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

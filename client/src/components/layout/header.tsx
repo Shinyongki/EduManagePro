@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Download, Save, GraduationCap, Home, Users, Building, BookOpen, ChevronDown } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { GraduationCap, Home, Users, Building, BookOpen, ChevronDown } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
   DropdownMenu,
@@ -10,22 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 export default function Header() {
-  const { toast } = useToast();
   const [location] = useLocation();
-
-  const handleBackup = () => {
-    toast({
-      title: "백업 다운로드",
-      description: "데이터 백업을 다운로드합니다.",
-    });
-  };
-
-  const handleSave = () => {
-    toast({
-      title: "데이터 저장",
-      description: "현재 데이터가 저장되었습니다.",
-    });
-  };
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
@@ -89,23 +73,6 @@ export default function Header() {
                 </DropdownMenuContent>
               </DropdownMenu>
             </nav>
-          </div>
-          <div className="flex items-center space-x-4">
-            <Button 
-              variant="outline" 
-              onClick={handleBackup}
-              data-testid="button-backup"
-            >
-              <Download className="mr-2 h-4 w-4" />
-              백업 다운로드
-            </Button>
-            <Button 
-              onClick={handleSave}
-              data-testid="button-save"
-            >
-              <Save className="mr-2 h-4 w-4" />
-              데이터 저장
-            </Button>
           </div>
         </div>
       </div>

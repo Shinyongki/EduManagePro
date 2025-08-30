@@ -11,11 +11,10 @@ export default function Footer() {
             </div>
             <div>
               <p className="text-sm font-medium text-slate-900">교육관리 시스템</p>
-              <p className="text-xs text-slate-500">v2.0.0 - Modular Edition</p>
             </div>
           </div>
           <div className="text-center md:text-right">
-            <p className="text-xs text-slate-500">© 2024 Education Management System. All rights reserved.</p>
+            <p className="text-xs text-slate-500">© 2025 Education Management System. All rights reserved.</p>
             <p className="text-xs text-slate-400 mt-1">TypeScript + React + Shadcn/ui</p>
           </div>
         </div>

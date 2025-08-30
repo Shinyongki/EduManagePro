@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { 
   BarChart3,
   PieChart,
@@ -21,10 +22,13 @@ import {
   Eye,
   RefreshCw,
   Download,
-  Map
+  Map,
+  MapPin,
+  Maximize2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useEducationData } from "@/hooks/use-education-data";
+import GyeongsangnamMap from "@/components/dashboard/gyeongsangnam-map";
 
 interface EducationStatistics {
   totalParticipants: number;
@@ -67,6 +71,9 @@ interface StatusReportData {
   socialWorkersB: number;
   lifeSupportC: number;
   totalWorkers_Budget: number;
+  // 정부 배정 (Government 기준)
+  socialWorkers_Government: number;
+  lifeSupport_Government: number;
   // D급 배정입력
   socialWorkersD: number;
   lifeSupportD: number;
@@ -75,6 +82,9 @@ interface StatusReportData {
   employmentRateE: number; // E/A 채용률
   employmentRateF: number; // F/B 채용률  
   employmentRateG: number; // G/C 채용률
+  // 개별 직종 채용률
+  employmentRateSocialWorkers: number; // 전담사회복지사 채용률
+  employmentRateLifeSupport: number; // 생활지원사 채용률
   // 종사자 근속현황
   avgTenureSocialWorkers: number;
   avgTenureLifeSupport: number;
@@ -106,7 +116,189 @@ export default function Dashboard() {
   const [previewCount, setPreviewCount] = useState(10);
   const [currentSnapshotDate, setCurrentSnapshotDate] = useState<string>('2025-08-04');
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
+  const [selectedMapType, setSelectedMapType] = useState<string>('');
+  const [isDistrictModalOpen, setIsDistrictModalOpen] = useState(false);
+  // 큰 지도 모달 상태
+  const [isLargeMapModalOpen, setIsLargeMapModalOpen] = useState(false);
+  const [selectedLargeMapData, setSelectedLargeMapData] = useState<any[]>([]);
+  const [selectedLargeMapTitle, setSelectedLargeMapTitle] = useState<string>('');
+  const [selectedLargeMapType, setSelectedLargeMapType] = useState<string>('');
   const { toast } = useToast();
+
+  // 📊 종합현황표 데이터 내보내기 함수
+  const exportStatusReportData = () => {
+    if (!statusReportData || statusReportData.length === 0) {
+      toast({
+        title: "내보낼 데이터 없음",
+        description: "종합현황표 데이터가 없습니다.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      // CSV 형태로 데이터 변환
+      const csvData = [];
+      
+      // 3층 구조 헤더 추가 (종합현황표와 동일한 구조)
+      
+      // 1단계 헤더 (상위 카테고리)
+      const header1 = [
+        '광역명', '시도', '시군구', '기관코드', '기관명',
+        '배정인원(수기관리 등록기준)', '', '',
+        '배정인원(예산내시 등록기준)', '', '',
+        'D 채용인원(수기관리 등록기준)', '', '',
+        '(1-1-2) 종사자 채용현황', '', '', '', '', '', '', '',
+        '(1-1-3) 종사자 근속현황', '',
+        '(1-4-1) 종사자 직무교육 이수율', '', '', '', '', '', '', '', '', '', '', ''
+      ];
+      
+      // 2단계 헤더 (중간 카테고리)
+      const header2 = [
+        '', '', '', '', '',
+        '', '', '',
+        '', '', '',
+        '', '', '',
+        '전체 종사자', '',
+        '전담사회복지사', '', '',
+        '생활지원사', '', '',
+        '평균 근속기간(일)', '',
+        'H 직무교육 대상인원(배움터 등록기준)', '', '',
+        'I 직무교육 이수인원(배움터 등록기준)', '', '',
+        '(I/H) 직무교육 이수율(배움터 등록기준)', '', '',
+        '(I/D) 직무교육 이수율(모인우리 등록기준)', '', ''
+      ];
+      
+      // 3단계 헤더 (세부 항목)
+      const header3 = [
+        '광역명', '시도', '시군구', '기관코드', '기관명',
+        // 배정인원(수기관리)
+        '전체 종사자(=①+②)', '전담사회복지사 ①', '생활지원사 ②',
+        // 배정인원(예산내시)
+        'A 전체(=①+②)', 'B 전담사회복지사 ①', 'C 생활지원사 ②',
+        // D 채용인원
+        'D① 전담사회복지사', 'D② 생활지원사', 'D 전체',
+        // 종사자 채용현황 - 전체 종사자
+        '채용수', '배정수',
+        // 종사자 채용현황 - 전담사회복지사
+        '채용수(F)', '배정수(B)', '(F/B) 채용률',
+        // 종사자 채용현황 - 생활지원사
+        '채용수(G)', '배정수(C)', '(G/C) 채용률',
+        // 종사자 근속현황
+        '전담사회복지사', '생활지원사',
+        // H 직무교육 대상인원
+        '전체', '전담사회복지사', '생활지원사',
+        // I 직무교육 이수인원
+        '전체', '전담사회복지사', '생활지원사',
+        // I/H 이수율
+        '전체', '전담사회복지사', '생활지원사',
+        // I/D 이수율
+        '전체', '전담사회복지사', '생활지원사'
+      ];
+      
+      // 3층 헤더 추가
+      csvData.push(header1);
+      csvData.push(header2);
+      csvData.push(header3);
+
+      // 데이터 행 추가 (3층 헤더 구조에 맞춤)
+      statusReportData.forEach(data => {
+        csvData.push([
+          data.province || '경남광역',
+          data.region || '경상남도',
+          data.district || '',
+          data.institutionCode || '',
+          data.institutionName || '',
+          // 배정인원(수기관리) - 전체 종사자(=①+②), 전담사회복지사 ①, 생활지원사 ②
+          data.totalCourse || 0,
+          data.socialWorkers_Course || 0,
+          data.lifeSupport_Course || 0,
+          // 배정인원(예산내시) - A 전체(=①+②), B 전담사회복지사 ①, C 생활지원사 ②
+          data.totalA || 0,
+          data.socialWorkersB || 0,
+          data.lifeSupportC || 0,
+          // D 채용인원 - D① 전담사회복지사, D② 생활지원사, D 전체
+          data.socialWorkersD || 0,
+          data.lifeSupportD || 0,
+          data.totalD || 0,
+          // 종사자 채용현황 - 전체 종사자: 채용수, 배정수
+          data.totalD || 0,
+          data.totalA || 0,
+          // 종사자 채용현황 - 전담사회복지사: 채용수(F), 배정수(B), (F/B) 채용률
+          data.socialWorkersD || 0,
+          data.socialWorkersB || 0,
+          data.socialWorkersB > 0 ? Math.round((data.socialWorkersD / data.socialWorkersB) * 100) : 0,
+          // 종사자 채용현황 - 생활지원사: 채용수(G), 배정수(C), (G/C) 채용률
+          data.lifeSupportD || 0,
+          data.lifeSupportC || 0,
+          data.lifeSupportC > 0 ? Math.round((data.lifeSupportD / data.lifeSupportC) * 100) : 0,
+          // 종사자 근속현황 - 전담사회복지사, 생활지원사
+          data.avgTenureSocialWorkers || 0,
+          data.avgTenureLifeSupport || 0,
+          // H 직무교육 대상인원 - 전체, 전담사회복지사, 생활지원사
+          data.educationTargetH_Total || 0,
+          data.educationTargetH_SocialWorkers || 0,
+          data.educationTargetH_LifeSupport || 0,
+          // I 직무교육 이수인원 - 전체, 전담사회복지사, 생활지원사
+          data.educationCompletedI_Total || 0,
+          data.educationCompletedI_SocialWorkers || 0,
+          data.educationCompletedI_LifeSupport || 0,
+          // I/H 이수율 - 전체, 전담사회복지사, 생활지원사
+          Math.round(data.educationRateIH_Total || 0),
+          Math.round(data.educationRateIH_SocialWorkers || 0),
+          Math.round(data.educationRateIH_LifeSupport || 0),
+          // I/D 이수율 - 전체, 전담사회복지사, 생활지원사
+          Math.round(data.educationRateID_Total || 0),
+          Math.round(data.educationRateID_SocialWorkers || 0),
+          Math.round(data.educationRateID_LifeSupport || 0)
+        ]);
+      });
+
+      // CSV 문자열 생성
+      const csvString = csvData.map(row => 
+        row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+      ).join('\n');
+
+      // BOM 추가 (한글 깨짐 방지)
+      const BOM = '\uFEFF';
+      const csvWithBOM = BOM + csvString;
+
+      // 파일 다운로드
+      const blob = new Blob([csvWithBOM], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      
+      // 파일명 생성 (현재 날짜 포함)
+      const now = new Date();
+      const dateString = now.getFullYear() + 
+        String(now.getMonth() + 1).padStart(2, '0') + 
+        String(now.getDate()).padStart(2, '0') + '_' +
+        String(now.getHours()).padStart(2, '0') + 
+        String(now.getMinutes()).padStart(2, '0');
+      
+      link.setAttribute('download', `종합현황표_${dateString}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "내보내기 완료",
+        description: `종합현황표 데이터가 CSV 파일로 다운로드되었습니다. (${statusReportData.length}개 기관)`,
+      });
+
+    } catch (error) {
+      console.error('데이터 내보내기 오류:', error);
+      toast({
+        title: "내보내기 실패",
+        description: "데이터 내보내기 중 오류가 발생했습니다.",
+        variant: "destructive"
+      });
+    }
+  };
 
   // 검색 필터링된 데이터
   const filteredStatusReportData = statusReportData.filter(row => {
@@ -121,6 +313,1002 @@ export default function Dashboard() {
       row.province.toLowerCase().includes(searchLower)
     );
   });
+  
+  // 교육 이수율 지도 데이터 (I/H 배움터 기준)
+  const educationMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          total: 0,
+          completed: 0,
+          institutions: 0
+        };
+      }
+      acc[district].total += item.educationTargetH_Total;
+      acc[district].completed += item.educationCompletedI_Total;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const rate = data.total > 0 ? (data.completed / data.total * 100) : 0;
+      return {
+        district,
+        value: Math.round(rate),
+        label: `${Math.round(rate)}%`,
+        description: `대상: ${data.total}명, 이수: ${data.completed}명, 기관: ${data.institutions}개`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 교육 이수율 지도 데이터 (I/D 모인우리 기준)
+  const educationMapDataID = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          totalD: 0,
+          completed: 0,
+          institutions: 0
+        };
+      }
+      acc[district].totalD += item.totalD;
+      acc[district].completed += item.educationCompletedI_Total;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const rate = data.totalD > 0 ? (data.completed / data.totalD * 100) : 0;
+      return {
+        district,
+        value: Math.round(rate),
+        label: `${Math.round(rate)}%`,
+        description: `채용인원: ${data.totalD}명, 이수: ${data.completed}명, 기관: ${data.institutions}개`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 전담사회복지사 채용률 지도 데이터 (기관 기준)
+  const employmentRateSocialWorkersMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          allocated: 0,
+          hired: 0,
+          institutions: 0
+        };
+      }
+      acc[district].allocated += item.socialWorkers_Course;
+      acc[district].hired += item.socialWorkersD;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const rate = data.allocated > 0 ? (data.hired / data.allocated * 100) : 0;
+      return {
+        district,
+        value: Math.round(rate),
+        label: `${Math.round(rate)}%`,
+        description: `배정: ${data.allocated}명, 채용: ${data.hired}명, 기관: ${data.institutions}개`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 생활지원사 채용률 지도 데이터 (기관 기준)
+  const employmentRateLifeSupportMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          allocated: 0,
+          hired: 0,
+          institutions: 0
+        };
+      }
+      acc[district].allocated += item.lifeSupport_Course;
+      acc[district].hired += item.lifeSupportD;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    const result = Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const rate = data.allocated > 0 ? (data.hired / data.allocated * 100) : 0;
+      return {
+        district,
+        value: Math.round(rate),
+        label: `${Math.round(rate)}%`,
+        description: `배정: ${data.allocated}명, 채용: ${data.hired}명, 기관: ${data.institutions}개`
+      };
+    });
+    
+    // 디버깅: 생활지원사 데이터 확인
+    console.log('=== 생활지원사 채용률 데이터 디버깅 ===');
+    console.log('지역별 데이터:', districtData);
+    console.log('최종 지도 데이터:', result);
+    console.log('값 범위:', {
+      min: Math.min(...result.filter(r => r.value > 0).map(r => r.value)),
+      max: Math.max(...result.map(r => r.value))
+    });
+    
+    return result;
+  }, [statusReportData]);
+  
+  // 전담사회복지사 배정 vs 채용 격차 지도 데이터 (기관 기준)
+  const allocationComparisonSocialWorkersMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          allocated: 0,
+          hired: 0,
+          institutions: 0
+        };
+      }
+      acc[district].allocated += item.socialWorkers_Course;
+      acc[district].hired += item.socialWorkersD;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const rate = data.allocated > 0 ? (data.hired / data.allocated * 100) : 0;
+      const gap = data.allocated - data.hired;
+      
+      return {
+        district,
+        value: Math.round(rate),
+        label: gap >= 0 ? `-${gap}명` : `+${Math.abs(gap)}명`,
+        color: gap > 0 ? '#ef4444' : gap < 0 ? '#3b82f6' : '#10b981',
+        description: `예산배정: ${data.allocated}명, 실제채용: ${data.hired}명, 부족: ${gap}명`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 생활지원사 배정 vs 채용 격차 지도 데이터 (기관 기준)
+  const allocationComparisonLifeSupportMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          allocated: 0,
+          hired: 0,
+          institutions: 0
+        };
+      }
+      acc[district].allocated += item.lifeSupport_Course;
+      acc[district].hired += item.lifeSupportD;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const rate = data.allocated > 0 ? (data.hired / data.allocated * 100) : 0;
+      const gap = data.allocated - data.hired;
+      
+      return {
+        district,
+        value: Math.round(rate),
+        label: gap >= 0 ? `-${gap}명` : `+${Math.abs(gap)}명`,
+        color: gap > 0 ? '#ef4444' : gap < 0 ? '#3b82f6' : '#10b981',
+        description: `예산배정: ${data.allocated}명, 실제채용: ${data.hired}명, 부족: ${gap}명`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 전담사회복지사 근속기간 지도 데이터
+  const tenureSocialWorkersMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          avgTenure: [],
+          count: 0,
+          institutions: 0
+        };
+      }
+      if (item.avgTenureSocialWorkers > 0) {
+        acc[district].avgTenure.push(item.avgTenureSocialWorkers);
+        acc[district].count++;
+      }
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const avg = data.avgTenure.length > 0 ? 
+        Math.round(data.avgTenure.reduce((a: number, b: number) => a + b, 0) / data.avgTenure.length) : 0;
+      
+      const years = Math.floor(avg / 365);
+      const months = Math.floor((avg % 365) / 30);
+      
+      return {
+        district,
+        value: Math.min(Math.round((avg / 365) * 20), 100), // 5년을 100으로 매핑
+        label: years > 0 ? `${years}년 ${months}개월` : avg > 0 ? `${months}개월` : '데이터 없음',
+        description: `평균 근속: ${years}년 ${months}개월, 기관: ${data.institutions}개, 인원: ${data.count}명`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 생활지원사 근속기간 지도 데이터
+  const tenureLifeSupportMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          avgTenure: [],
+          count: 0,
+          institutions: 0
+        };
+      }
+      if (item.avgTenureLifeSupport > 0) {
+        acc[district].avgTenure.push(item.avgTenureLifeSupport);
+        acc[district].count++;
+      }
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => {
+      const avg = data.avgTenure.length > 0 ?
+        Math.round(data.avgTenure.reduce((a: number, b: number) => a + b, 0) / data.avgTenure.length) : 0;
+      
+      const years = Math.floor(avg / 365);
+      const months = Math.floor((avg % 365) / 30);
+      
+      return {
+        district,
+        value: Math.min(Math.round((avg / 365) * 20), 100), // 5년을 100으로 매핑
+        label: years > 0 ? `${years}년 ${months}개월` : avg > 0 ? `${months}개월` : '데이터 없음',
+        description: `평균 근속: ${years}년 ${months}개월, 기관: ${data.institutions}개, 인원: ${data.count}명`
+      };
+    });
+  }, [statusReportData]);
+  
+  // 기관 분포 지도 데이터
+  const institutionMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          count: 0,
+          names: [],
+          hasAllocationDifference: false,
+          differenceCount: 0
+        };
+      }
+      acc[district].count += 1;
+      acc[district].names.push(item.institutionName);
+      
+      // 복지부 배정과 기관 배정 차이 확인
+      const governmentTotal = item.socialWorkersB + item.lifeSupportC;
+      const courseTotal = item.socialWorkers_Course + item.lifeSupport_Course;
+      const hasDifference = governmentTotal !== courseTotal;
+      
+      if (hasDifference) {
+        acc[district].hasAllocationDifference = true;
+        acc[district].differenceCount += 1;
+      }
+      
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => ({
+      district,
+      value: data.count,
+      label: data.hasAllocationDifference ? `${district} ⭐ ${data.count}개` : `${district} ${data.count}개`,
+      description: data.hasAllocationDifference 
+        ? `${data.names.slice(0, 3).join(', ')}${data.names.length > 3 ? ` 외 ${data.names.length - 3}개` : ''} (⭐ 배정차이 ${data.differenceCount}개 기관)`
+        : data.names.slice(0, 3).join(', ') + (data.names.length > 3 ? ` 외 ${data.names.length - 3}개` : ''),
+      // 별표가 있는 지역을 위한 추가 스타일링 정보
+      hasAllocationDifference: data.hasAllocationDifference
+    }));
+  }, [statusReportData]);
+  
+  // 전담사회복지사 현황 지도 데이터
+  const socialWorkersMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          allocated: 0,
+          hired: 0,
+          institutions: 0
+        };
+      }
+      acc[district].allocated += item.socialWorkers_Course;
+      acc[district].hired += item.socialWorkersD;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => ({
+      district,
+      value: data.hired,
+      label: `${data.allocated}/${data.hired}`,
+      description: `전담사회복지사 배정/채용: ${data.allocated}/${data.hired}명, 기관: ${data.institutions}개`
+    }));
+  }, [statusReportData]);
+  
+  // 생활지원사 현황 지도 데이터
+  const lifeSupportMapData = useMemo(() => {
+    const districtData = statusReportData.reduce((acc, item) => {
+      const district = item.district || '기타';
+      if (!acc[district]) {
+        acc[district] = {
+          allocated: 0,
+          hired: 0,
+          institutions: 0
+        };
+      }
+      acc[district].allocated += item.lifeSupport_Course;
+      acc[district].hired += item.lifeSupportD;
+      acc[district].institutions += 1;
+      return acc;
+    }, {} as any);
+    
+    return Object.entries(districtData).map(([district, data]: [string, any]) => ({
+      district,
+      value: data.hired,
+      label: `${data.allocated}/${data.hired}`,
+      description: `생활지원사 배정/채용: ${data.allocated}/${data.hired}명, 기관: ${data.institutions}개`
+    }));
+  }, [statusReportData]);
+  
+  // 선택된 시군구의 기관 데이터 필터링
+  const selectedDistrictInstitutions = useMemo(() => {
+    if (!selectedDistrict) return [];
+    return statusReportData.filter(item => item.district === selectedDistrict);
+  }, [statusReportData, selectedDistrict]);
+  
+  // 지역 클릭 핸들러
+  const handleDistrictClick = (districtName: string, mapType?: string) => {
+    setSelectedDistrict(districtName);
+    setSelectedMapType(mapType || '');
+    setIsDistrictModalOpen(true);
+  };
+
+  // 큰 지도 열기 핸들러
+  const handleOpenLargeMap = (mapData: any[], title: string, mapType: string) => {
+    setSelectedLargeMapData(mapData);
+    setSelectedLargeMapTitle(title);
+    setSelectedLargeMapType(mapType);
+    setIsLargeMapModalOpen(true);
+  };
+
+  // 큰 지도에서 지역 클릭 핸들러 (큰 지도를 유지하면서 지역 정보 표시)
+  const handleDistrictClickFromLargeMap = (districtName: string, mapType?: string) => {
+    setSelectedDistrict(districtName);
+    setSelectedMapType(mapType || selectedLargeMapType);
+    setIsDistrictModalOpen(true);
+    // 큰 지도는 열린 상태로 유지
+  };
+
+  // 맞춤형 모달 컨텐츠 렌더링
+  const renderModalContent = () => {
+    if (selectedDistrictInstitutions.length === 0) {
+      return (
+        <div className="text-center py-8 text-gray-500">
+          해당 지역에 기관 데이터가 없습니다.
+        </div>
+      );
+    }
+
+    const getModalTitle = () => {
+      const typeMap: { [key: string]: string } = {
+        'education-ih': 'I/H 교육 이수율',
+        'education-id': 'I/D 교육 이수율',
+        'employment-social-workers': '전담사회복지사 채용률',
+        'employment-life-support': '생활지원사 채용률',
+        'allocation-social-workers': '전담사회복지사 배정/채용 격차',
+        'allocation-life-support': '생활지원사 배정/채용 격차',
+        'tenure-social-workers': '전담사회복지사 평균 근속기간',
+        'tenure-life-support': '생활지원사 평균 근속기간',
+        'institutions': '기관 분포',
+        'employees-social-workers': '전담사회복지사 배치 현황',
+        'employees-life-support': '생활지원사 배치 현황'
+      };
+      return typeMap[selectedMapType] || '종합 현황';
+    };
+
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Building className="h-5 w-5 text-blue-600" />
+            {selectedDistrict} - {getModalTitle()}
+          </DialogTitle>
+          <DialogDescription>
+            {getModalTitle()}에 대한 기관별 상세 정보입니다.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          <div className="overflow-x-auto">
+            {selectedMapType.startsWith('education') && renderEducationTable()}
+            {selectedMapType.includes('employment') && renderEmploymentTable()}
+            {selectedMapType.includes('allocation') && renderAllocationTable()}
+            {selectedMapType.includes('tenure') && renderTenureTable()}
+            {selectedMapType === 'institutions' && renderInstitutionTable()}
+            {selectedMapType.includes('employees') && renderEmployeeTable()}
+            {!selectedMapType && renderFullTable()}
+          </div>
+          
+          <div className="flex justify-between items-center pt-4 border-t">
+            <div className="text-sm text-gray-600">
+              총 {selectedDistrictInstitutions.length}개 기관
+            </div>
+            <Button onClick={() => setIsDistrictModalOpen(false)} variant="outline">
+              닫기
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  };
+
+  // 큰 지도 모달 컨텐츠 렌더링
+  const renderLargeMapContent = () => {
+    const getDetailedMapInfo = () => {
+      const totalInstitutions = statusReportData.length;
+      const stats = statusReportData.reduce((acc, item) => {
+        const governmentTotal = item.socialWorkersB + item.lifeSupportC;
+        const courseTotal = item.socialWorkers_Course + item.lifeSupport_Course;
+        const totalHired = item.socialWorkersD + item.lifeSupportD;
+        
+        acc.totalGovernmentAllocation += governmentTotal;
+        acc.totalCourseAllocation += courseTotal;
+        acc.totalHired += totalHired;
+        acc.totalEducationTarget += item.educationTargetH_Total;
+        acc.totalEducationCompleted += item.educationCompletedI_Total;
+        
+        if (governmentTotal !== courseTotal) {
+          acc.institutionsWithDifference++;
+        }
+        
+        return acc;
+      }, {
+        totalGovernmentAllocation: 0,
+        totalCourseAllocation: 0,
+        totalHired: 0,
+        totalEducationTarget: 0,
+        totalEducationCompleted: 0,
+        institutionsWithDifference: 0
+      });
+
+      const overallHiringRate = stats.totalCourseAllocation > 0 ? 
+        (stats.totalHired / stats.totalCourseAllocation * 100).toFixed(1) : '0.0';
+      const overallEducationRate = stats.totalEducationTarget > 0 ? 
+        (stats.totalEducationCompleted / stats.totalEducationTarget * 100).toFixed(1) : '0.0';
+      const allocationDifferenceRate = ((stats.institutionsWithDifference / totalInstitutions) * 100).toFixed(1);
+
+      return { stats, overallHiringRate, overallEducationRate, allocationDifferenceRate, totalInstitutions };
+    };
+
+    const { stats, overallHiringRate, overallEducationRate, allocationDifferenceRate, totalInstitutions } = getDetailedMapInfo();
+
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <MapPin className="h-6 w-6 text-green-600" />
+            {selectedLargeMapTitle} - 상세 지역별 현황
+          </DialogTitle>
+          <DialogDescription>
+            경상남도 전체 지역의 {selectedLargeMapTitle.toLowerCase()}을 상세히 확인할 수 있습니다.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-6">
+          {/* 전체 통계 요약 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-blue-600">{totalInstitutions}</div>
+              <div className="text-sm text-gray-600">총 기관 수</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-green-600">{overallHiringRate}%</div>
+              <div className="text-sm text-gray-600">전체 채용률</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-purple-600">{overallEducationRate}%</div>
+              <div className="text-sm text-gray-600">전체 교육 이수율</div>
+            </div>
+            <div className="text-center">
+              <div className="text-2xl font-bold text-orange-600">{allocationDifferenceRate}%</div>
+              <div className="text-sm text-gray-600">배정 차이 기관 비율</div>
+            </div>
+          </div>
+
+          {/* 큰 지도 */}
+          <div className="bg-white rounded-lg border p-4">
+            <GyeongsangnamMap
+              data={selectedLargeMapData}
+              colorScheme={selectedLargeMapType.includes('education') ? 'green' : 
+                          selectedLargeMapType.includes('employment') ? 'blue' :
+                          selectedLargeMapType.includes('allocation') ? 'red' :
+                          selectedLargeMapType.includes('tenure') ? 'purple' :
+                          selectedLargeMapType === 'institutions' ? 'blue' : 'green'}
+              title={selectedLargeMapTitle}
+              height="700px"
+              showLabels={true}
+              onDistrictClick={(district) => {
+                handleDistrictClickFromLargeMap(district, selectedLargeMapType);
+              }}
+            />
+          </div>
+
+          {/* 범례 및 설명 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white rounded-lg border p-4">
+              <h4 className="font-semibold text-gray-800 mb-3">지도 범례</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-green-600 rounded"></div>
+                  <span>높은 수치 (상위 25%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-blue-500 rounded"></div>
+                  <span>중간 수치 (25-50%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-blue-300 rounded"></div>
+                  <span>낮은 수치 (50-75%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-blue-100 rounded"></div>
+                  <span>매우 낮은 수치 (하위 25%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 bg-gray-100 rounded border"></div>
+                  <span>데이터 없음</span>
+                </div>
+                {selectedLargeMapType === 'institutions' && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-orange-500 text-lg">⭐</span>
+                    <span>복지부/기관 배정 차이가 있는 시군</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg border p-4">
+              <h4 className="font-semibold text-gray-800 mb-3">상호작용 가이드</h4>
+              <div className="space-y-2 text-sm text-gray-600">
+                <div>• 지도를 마우스휠로 확대/축소할 수 있습니다</div>
+                <div>• 각 시군을 클릭하면 해당 지역의 상세 정보를 볼 수 있습니다</div>
+                <div>• 라벨에 마우스를 올리면 추가 정보가 표시됩니다</div>
+                <div>• 색상이 진할수록 해당 지표가 높음을 의미합니다</div>
+                {selectedLargeMapType === 'institutions' && (
+                  <div>• ⭐ 표시는 복지부 배정과 기관 배정에 차이가 있는 지역입니다</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center pt-4 border-t">
+            <div className="text-sm text-gray-600">
+              경상남도 18개 시군 전체 현황 | 마지막 업데이트: {currentSnapshotDate}
+            </div>
+            <Button onClick={() => setIsLargeMapModalOpen(false)} variant="outline">
+              닫기
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  };
+
+  // 교육 관련 테이블 렌더링
+  const renderEducationTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          {selectedMapType.includes('ih') && (
+            <>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">교육 대상<br/>(H)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">이수 완료<br/>(I)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">I/H 이수율</th>
+            </>
+          )}
+          {selectedMapType.includes('id') && (
+            <>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">이수 완료<br/>(I)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">채용 인원<br/>(D)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">I/D 이수율</th>
+            </>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => (
+          <tr key={index} className="hover:bg-gray-50">
+            <td className="border border-gray-300 px-3 py-2 text-xs font-medium">{institution.institutionName}</td>
+            <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+            {selectedMapType.includes('ih') && (
+              <>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-blue-600">
+                  {institution.educationTargetH_Total}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-green-600">
+                  {institution.educationCompletedI_Total}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                  <div className={`font-semibold ${institution.educationRateIH_Total >= 80 ? 'text-green-600' : institution.educationRateIH_Total >= 60 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {Math.round(institution.educationRateIH_Total)}%
+                  </div>
+                </td>
+              </>
+            )}
+            {selectedMapType.includes('id') && (
+              <>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-green-600">
+                  {institution.educationCompletedI_Total}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-blue-600">
+                  {institution.socialWorkersD + institution.lifeSupportD}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                  <div className={`font-semibold ${institution.educationRateID_Total >= 80 ? 'text-green-600' : institution.educationRateID_Total >= 60 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {Math.round(institution.educationRateID_Total)}%
+                  </div>
+                </td>
+              </>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  // 채용 관련 테이블 렌더링
+  const renderEmploymentTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          {selectedMapType.includes('social-workers') ? (
+            <>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">배정 인원<br/>(B)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">채용 인원<br/>(F)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">전담사회복지사<br/>채용률</th>
+            </>
+          ) : (
+            <>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">배정 인원<br/>(C)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">채용 인원<br/>(G)</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">생활지원사<br/>채용률</th>
+            </>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => (
+          <tr key={index} className="hover:bg-gray-50">
+            <td className="border border-gray-300 px-3 py-2 text-xs font-medium">{institution.institutionName}</td>
+            <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+            {selectedMapType.includes('social-workers') ? (
+              <>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-blue-600">
+                  {institution.socialWorkers_Government}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-green-600">
+                  {institution.socialWorkersD}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                  <div className={`font-semibold ${institution.employmentRateSocialWorkers >= 80 ? 'text-green-600' : institution.employmentRateSocialWorkers >= 60 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {Math.round(institution.employmentRateSocialWorkers)}%
+                  </div>
+                </td>
+              </>
+            ) : (
+              <>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-blue-600">
+                  {institution.lifeSupport_Government}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-green-600">
+                  {institution.lifeSupportD}
+                </td>
+                <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                  <div className={`font-semibold ${institution.employmentRateLifeSupport >= 80 ? 'text-green-600' : institution.employmentRateLifeSupport >= 60 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {Math.round(institution.employmentRateLifeSupport)}%
+                  </div>
+                </td>
+              </>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+
+  // 배정/채용 격차 테이블 렌더링
+  const renderAllocationTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          {selectedMapType.includes('social-workers') ? (
+            <>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">배정 인원</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">채용 인원</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">전담사회복지사<br/>격차</th>
+            </>
+          ) : (
+            <>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">배정 인원</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">채용 인원</th>
+              <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">생활지원사<br/>격차</th>
+            </>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => {
+          const allocation = selectedMapType.includes('social-workers') ? institution.socialWorkers_Course : institution.lifeSupport_Course;
+          const hired = selectedMapType.includes('social-workers') ? institution.socialWorkersD : institution.lifeSupportD;
+          const gap = allocation - hired;
+          
+          return (
+            <tr key={index} className="hover:bg-gray-50">
+              <td className="border border-gray-300 px-3 py-2 text-xs font-medium">{institution.institutionName}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-blue-600">
+                {allocation}
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-green-600">
+                {hired}
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className={`font-semibold ${gap > 0 ? 'text-red-600' : gap < 0 ? 'text-blue-600' : 'text-green-600'}`}>
+                  {gap > 0 ? `+${gap}` : gap}
+                  <div className="text-xs text-gray-500 font-normal">
+                    ({gap > 0 ? '부족' : gap < 0 ? '초과' : '일치'})
+                  </div>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  // 근속 기간 테이블 렌더링
+  const renderTenureTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">
+            {selectedMapType.includes('social-workers') ? '전담사회복지사' : '생활지원사'}<br/>평균 근속기간
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => {
+          const tenureDays = selectedMapType.includes('social-workers') ? institution.avgTenureSocialWorkers : institution.avgTenureLifeSupport;
+          const tenureYears = Math.floor(tenureDays / 365);
+          const tenureMonths = Math.floor((tenureDays % 365) / 30);
+          
+          return (
+            <tr key={index} className="hover:bg-gray-50">
+              <td className="border border-gray-300 px-3 py-2 text-xs font-medium">{institution.institutionName}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className={`font-semibold ${tenureDays >= 1095 ? 'text-green-600' : tenureDays >= 730 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {tenureDays > 0 ? (
+                    tenureYears > 0 ? `${tenureYears}년 ${tenureMonths}개월` : `${tenureMonths}개월`
+                  ) : '-'}
+                </div>
+                <div className="text-xs text-gray-500">
+                  ({tenureDays}일)
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  // 기관 분포 테이블 렌더링
+  const renderInstitutionTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">복지부 배정<br/>(정부 기준)</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관 배정<br/>(과정 기준)</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">배정 차이<br/>(기관-복지부)</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">실제 채용</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">운영 상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => {
+          const governmentTotal = institution.socialWorkersB + institution.lifeSupportC;
+          const courseTotal = institution.socialWorkers_Course + institution.lifeSupport_Course;
+          const totalHired = institution.socialWorkersD + institution.lifeSupportD;
+          const allocationDifference = courseTotal - governmentTotal;
+          const operationStatus = totalHired >= courseTotal * 0.8 ? '정상' : totalHired > 0 ? '부분운영' : '미운영';
+          
+          // 배정 차이에 따른 행 스타일 결정
+          const hasDifference = allocationDifference !== 0;
+          const rowBgClass = hasDifference ? 
+            (allocationDifference > 0 ? 'bg-green-50 hover:bg-green-100' : 'bg-red-50 hover:bg-red-100') : 
+            'hover:bg-gray-50';
+          
+          return (
+            <tr key={index} className={rowBgClass}>
+              <td className={`border border-gray-300 px-3 py-2 text-xs font-medium ${hasDifference ? 'border-l-4 ' + (allocationDifference > 0 ? 'border-l-green-500' : 'border-l-red-500') : ''}`}>
+                {institution.institutionName}
+                {hasDifference && (
+                  <div className={`text-xs mt-1 px-2 py-1 rounded-full inline-block ml-2 ${allocationDifference > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                    {allocationDifference > 0 ? '▲ 증원' : '▼ 감원'}
+                  </div>
+                )}
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+              <td className={`border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-blue-600 ${hasDifference && allocationDifference < 0 ? 'bg-blue-50' : ''}`}>
+                {governmentTotal}
+                <div className="text-xs text-gray-500 font-normal">
+                  SW:{institution.socialWorkersB} / LS:{institution.lifeSupportC}
+                </div>
+              </td>
+              <td className={`border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-purple-600 ${hasDifference && allocationDifference > 0 ? 'bg-purple-50' : ''}`}>
+                {courseTotal}
+                <div className="text-xs text-gray-500 font-normal">
+                  SW:{institution.socialWorkers_Course} / LS:{institution.lifeSupport_Course}
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className={`font-semibold text-lg ${allocationDifference > 0 ? 'text-green-600' : allocationDifference < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                  {allocationDifference > 0 ? `+${allocationDifference}` : allocationDifference}
+                </div>
+                <div className={`text-xs font-semibold mt-1 px-2 py-1 rounded-full ${allocationDifference > 0 ? 'bg-green-100 text-green-800' : allocationDifference < 0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-600'}`}>
+                  {allocationDifference > 0 ? '기관 증원' : allocationDifference < 0 ? '기관 감원' : '동일'}
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center font-semibold text-green-600">
+                {totalHired}
+                <div className="text-xs text-gray-500 font-normal">
+                  SW:{institution.socialWorkersD} / LS:{institution.lifeSupportD}
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className={`font-semibold ${operationStatus === '정상' ? 'text-green-600' : operationStatus === '부분운영' ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {operationStatus}
+                </div>
+                <div className="text-xs text-gray-500 font-normal">
+                  {Math.round((totalHired / courseTotal) * 100)}%
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  // 종사자 배치 현황 테이블 렌더링
+  const renderEmployeeTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">
+            {selectedMapType.includes('social-workers') ? '전담사회복지사' : '생활지원사'}<br/>배치 현황
+          </th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">배치율</th>
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => {
+          const allocated = selectedMapType.includes('social-workers') ? institution.socialWorkers_Course : institution.lifeSupport_Course;
+          const hired = selectedMapType.includes('social-workers') ? institution.socialWorkersD : institution.lifeSupportD;
+          const placementRate = allocated > 0 ? (hired / allocated) * 100 : 0;
+          
+          return (
+            <tr key={index} className="hover:bg-gray-50">
+              <td className="border border-gray-300 px-3 py-2 text-xs font-medium">{institution.institutionName}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className="font-semibold">
+                  <span className="text-blue-600">{allocated}</span>
+                  <span className="mx-1">/</span>
+                  <span className="text-green-600">{hired}</span>
+                </div>
+                <div className="text-xs text-gray-500">배정/채용</div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className={`font-semibold ${placementRate >= 80 ? 'text-green-600' : placementRate >= 60 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {Math.round(placementRate)}%
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+
+  // 전체 테이블 렌더링 (기존 모달 내용)
+  const renderFullTable = () => (
+    <table className="w-full border-collapse border border-gray-300">
+      <thead>
+        <tr className="bg-gray-50">
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-left">기관명</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">기관코드</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">전담사회복지사<br/>배정/채용</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">생활지원사<br/>배정/채용</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">채용률</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">교육 이수율<br/>(I/H)</th>
+          <th className="border border-gray-300 px-3 py-2 text-xs font-semibold text-center">평균 근속기간</th>
+        </tr>
+      </thead>
+      <tbody>
+        {selectedDistrictInstitutions.map((institution, index) => {
+          const totalAllocated = institution.socialWorkers_Course + institution.lifeSupport_Course;
+          const totalHired = institution.socialWorkersD + institution.lifeSupportD;
+          const overallHiringRate = totalAllocated > 0 ? ((totalHired / totalAllocated) * 100) : 0;
+          const avgTenureDays = Math.round((institution.avgTenureSocialWorkers + institution.avgTenureLifeSupport) / 2);
+          const avgTenureYears = Math.floor(avgTenureDays / 365);
+          const avgTenureMonths = Math.floor((avgTenureDays % 365) / 30);
+          
+          return (
+            <tr key={index} className="hover:bg-gray-50">
+              <td className="border border-gray-300 px-3 py-2 text-xs font-medium">{institution.institutionName}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">{institution.institutionCode}</td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className="text-blue-600 font-semibold">{institution.socialWorkers_Course} / {institution.socialWorkersD}</div>
+                <div className="text-xs text-gray-500">
+                  {institution.socialWorkers_Course > 0 ? Math.round((institution.socialWorkersD / institution.socialWorkers_Course) * 100) : 0}%
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className="text-green-600 font-semibold">{institution.lifeSupport_Course} / {institution.lifeSupportD}</div>
+                <div className="text-xs text-gray-500">
+                  {institution.lifeSupport_Course > 0 ? Math.round((institution.lifeSupportD / institution.lifeSupport_Course) * 100) : 0}%
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className={`font-semibold ${overallHiringRate >= 80 ? 'text-green-600' : overallHiringRate >= 60 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {Math.round(overallHiringRate)}%
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className="font-semibold text-purple-600">
+                  {Math.round(institution.educationRateIH_Total)}%
+                </div>
+                <div className="text-xs text-gray-500">
+                  {institution.educationCompletedI_Total}/{institution.educationTargetH_Total}명
+                </div>
+              </td>
+              <td className="border border-gray-300 px-3 py-2 text-xs text-center">
+                <div className="font-semibold text-orange-600">
+                  {avgTenureDays > 0 ? (
+                    avgTenureYears > 0 ? `${avgTenureYears}년 ${avgTenureMonths}개월` : `${avgTenureMonths}개월`
+                  ) : '-'}
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
   
   const {
     isLoading: dataLoading, 
@@ -178,10 +1366,12 @@ export default function Dashboard() {
         const allocationFields = [
           'allocatedSocialWorkers', 'allocatedLifeSupport', 'allocatedSocialWorkersGov',
           'budgetSocialWorkers', 'budgetLifeSupport', 'actualSocialWorkers', 'actualLifeSupport',
-          'hiredSocialWorkers', 'hiredLifeSupport'
+          'hiredSocialWorkers', 'hiredLifeSupport', 'socialWorkersB', 'lifeSupportC',
+          '전담사회복지사_예산', '생활지원사_예산', 'B_전담사회복지사', 'C_생활지원사'
         ];
         
         if (code === 'A48000002') {
+          console.log('A48000002 기관의 모든 필드:', Object.keys(inst));
           console.log('A48000002 배정 관련 필드들:');
           allocationFields.forEach(field => {
             if (inst[field] !== undefined) {
@@ -196,8 +1386,20 @@ export default function Dashboard() {
           const lifeSupport_Course = parseInt(inst.allocatedLifeSupport || 0);
           
           // 2. 예산내시 등록기준 (정부 배정)
-          const socialWorkers_Budget = parseInt(inst.allocatedSocialWorkersGov || 0);
-          const lifeSupport_Budget = parseInt(inst.allocatedLifeSupportGov || 0);
+          const socialWorkers_Budget = parseInt(
+            inst.allocatedSocialWorkersGov || 
+            inst.budgetSocialWorkers || 
+            inst.socialWorkersB ||
+            inst['전담사회복지사_예산'] ||
+            inst['B_전담사회복지사'] || 0
+          );
+          const lifeSupport_Budget = parseInt(
+            inst.allocatedLifeSupportGov || 
+            inst.budgetLifeSupport || 
+            inst.lifeSupportC ||
+            inst['생활지원사_예산'] ||
+            inst['C_생활지원사'] || 0
+          );
           
           // A48000002 디버깅
           if (code === 'A48000002') {
@@ -229,6 +1431,9 @@ export default function Dashboard() {
             socialWorkersB: socialWorkers_Budget,
             lifeSupportC: lifeSupport_Budget,
             totalWorkers_Budget: socialWorkers_Budget + lifeSupport_Budget,
+            // 정부 배정 인원 (Government 필드 추가)
+            socialWorkers_Government: socialWorkers_Budget,
+            lifeSupport_Government: lifeSupport_Budget,
             // D 채용인원(수기관리 등록기준) - 실제 고용
             socialWorkersD: parseInt(inst.hiredSocialWorkers || 0),
             lifeSupportD: parseInt(inst.hiredLifeSupport || 0),
@@ -236,6 +1441,9 @@ export default function Dashboard() {
             employmentRateE: 0,
             employmentRateF: 0,
             employmentRateG: 0,
+            // 개별 직종 채용률 초기화
+            employmentRateSocialWorkers: 0,
+            employmentRateLifeSupport: 0,
             avgTenureSocialWorkers: 0,
             avgTenureLifeSupport: 0,
             // 직무교육 이수율 초기화
@@ -551,10 +1759,14 @@ export default function Dashboard() {
         institution.educationRateID_LifeSupport = institution.lifeSupportD > 0 ? 
           (institution.educationCompletedI_LifeSupport / institution.lifeSupportD) * 100 : 0;
         
-        // 채용률 계산
-        institution.employmentRateE = institution.totalA > 0 ? (institution.avgTenureSocialWorkers / institution.totalA) * 100 : 0;
-        institution.employmentRateF = institution.socialWorkersB > 0 ? (institution.avgTenureSocialWorkers / institution.socialWorkersB) * 100 : 0;
-        institution.employmentRateG = institution.lifeSupportC > 0 ? (institution.avgTenureLifeSupport / institution.lifeSupportC) * 100 : 0;
+        // 채용률 계산 (배정 대비 실제 채용률)
+        institution.employmentRateE = institution.totalA > 0 ? (institution.totalD / institution.totalA) * 100 : 0;
+        institution.employmentRateF = institution.socialWorkersB > 0 ? (institution.socialWorkersD / institution.socialWorkersB) * 100 : 0;
+        institution.employmentRateG = institution.lifeSupportC > 0 ? (institution.lifeSupportD / institution.lifeSupportC) * 100 : 0;
+        
+        // 개별 직종 채용률 계산 (정부 배정 대비)
+        institution.employmentRateSocialWorkers = institution.socialWorkersB > 0 ? (institution.socialWorkersD / institution.socialWorkersB) * 100 : 0;
+        institution.employmentRateLifeSupport = institution.lifeSupportC > 0 ? (institution.lifeSupportD / institution.lifeSupportC) * 100 : 0;
       });
 
       // 모든 기관을 반환 (데이터가 없어도 표시)
@@ -724,13 +1936,35 @@ export default function Dashboard() {
       {/* 종합 현황표 섹션 */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-blue-600" />
-            종합 현황표
-          </CardTitle>
-          <CardDescription>
-            교육 이수 현황과 종사자 현황을 연동한 종합 분석 데이터
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5 text-blue-600" />
+                종합 현황표
+              </CardTitle>
+              <CardDescription>
+                교육 이수 현황과 종사자 현황을 연동한 종합 분석 데이터
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={exportStatusReportData}
+                disabled={!statusReportData || statusReportData.length === 0}
+                className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+              >
+                <Download className="h-4 w-4 mr-1" />
+                Excel 내보내기
+              </Button>
+              <a href="/comprehensive-map">
+                <Button variant="outline" size="sm">
+                  <Map className="h-4 w-4 mr-1" />
+                  종합지도 보기
+                </Button>
+              </a>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {/* 검색 입력 필드 */}
@@ -910,6 +2144,311 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
+      {/* 지도 섹션 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Map className="h-5 w-5 text-blue-600" />
+            경상남도 시군구별 교육 현황 지도
+          </CardTitle>
+          <CardDescription>
+            경상남도 내 각 시군구별 교육 이수율과 기관 분포를 시각화합니다
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="education-group" className="w-full">
+            <TabsList className="grid w-full grid-cols-3 mb-2">
+              <TabsTrigger value="education-group" className="text-xs">교육 이수율</TabsTrigger>
+              <TabsTrigger value="employment-group" className="text-xs">채용 현황</TabsTrigger>
+              <TabsTrigger value="basic-group" className="text-xs">기본 현황</TabsTrigger>
+            </TabsList>
+            
+            {/* 교육 이수율 그룹 */}
+            <TabsContent value="education-group" className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-semibold">I/H 이수율 (배움터 기준)</h4>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleOpenLargeMap(educationMapData, 'I/H 교육 이수율', 'education-ih')}
+                      className="text-xs"
+                    >
+                      <Maximize2 className="h-3 w-3 mr-1" />
+                      큰 지도
+                    </Button>
+                  </div>
+                  <GyeongsangnamMap
+                    data={educationMapData}
+                    colorScheme="green"
+                    title="I/H 교육 이수율"
+                    height="450px"
+                    showLabels={true}
+                    onDistrictClick={(district) => handleDistrictClick(district, 'education-ih')}
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-semibold">I/D 이수율 (모인우리 기준)</h4>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleOpenLargeMap(educationMapDataID, 'I/D 교육 이수율', 'education-id')}
+                      className="text-xs"
+                    >
+                      <Maximize2 className="h-3 w-3 mr-1" />
+                      큰 지도
+                    </Button>
+                  </div>
+                  <GyeongsangnamMap
+                    data={educationMapDataID}
+                    colorScheme="blue"
+                    title="I/D 교육 이수율"
+                    height="450px"
+                    showLabels={true}
+                    onDistrictClick={(district) => handleDistrictClick(district, 'education-id')}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+            
+            {/* 채용 현황 그룹 */}
+            <TabsContent value="employment-group" className="space-y-4">
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">채용률 현황</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">전담사회복지사 (기관 기준)</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(employmentRateSocialWorkersMapData, '전담사회복지사 채용률', 'employment-social-workers')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={employmentRateSocialWorkersMapData}
+                        colorScheme="blue"
+                        title="전담사회복지사 채용률"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'employment-social-workers')}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">생활지원사 (기관 기준)</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(employmentRateLifeSupportMapData, '생활지원사 채용률', 'employment-life-support')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={employmentRateLifeSupportMapData}
+                        colorScheme="green"
+                        title="생활지원사 채용률"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'employment-life-support')}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">배정 vs 채용 격차</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">전담사회복지사</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(allocationComparisonSocialWorkersMapData, '전담사회복지사 인력 부족/초과', 'allocation-social-workers')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={allocationComparisonSocialWorkersMapData}
+                        colorScheme="red"
+                        title="전담사회복지사 인력 부족/초과"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'allocation-social-workers')}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">생활지원사</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(allocationComparisonLifeSupportMapData, '생활지원사 인력 부족/초과', 'allocation-life-support')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={allocationComparisonLifeSupportMapData}
+                        colorScheme="red"
+                        title="생활지원사 인력 부족/초과"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'allocation-life-support')}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">평균 근속기간</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">전담사회복지사</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(tenureSocialWorkersMapData, '전담사회복지사 평균 근속기간', 'tenure-social-workers')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={tenureSocialWorkersMapData}
+                        colorScheme="purple"
+                        title="전담사회복지사 평균 근속기간"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'tenure-social-workers')}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">생활지원사</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(tenureLifeSupportMapData, '생활지원사 평균 근속기간', 'tenure-life-support')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={tenureLifeSupportMapData}
+                        colorScheme="orange"
+                        title="생활지원사 평균 근속기간"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'tenure-life-support')}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+            
+            {/* 기본 현황 그룹 */}
+            <TabsContent value="basic-group" className="space-y-4">
+              <div className="space-y-4">
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-sm font-semibold">기관 분포</h4>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleOpenLargeMap(institutionMapData, '기관 분포 현황', 'institutions')}
+                      className="text-xs"
+                    >
+                      <Maximize2 className="h-3 w-3 mr-1" />
+                      큰 지도
+                    </Button>
+                  </div>
+                  <GyeongsangnamMap
+                    data={institutionMapData}
+                    colorScheme="blue"
+                    title="기관 분포 현황"
+                    height="400px"
+                    showLabels={true}
+                    onDistrictClick={(district) => handleDistrictClick(district, 'institutions')}
+                  />
+                </div>
+                
+                <div>
+                  <h4 className="text-sm font-semibold mb-2">종사자 현황</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">전담사회복지사</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(socialWorkersMapData, '전담사회복지사 배치 현황', 'employees-social-workers')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={socialWorkersMapData}
+                        colorScheme="green"
+                        title="전담사회복지사 배치 현황"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'employees-social-workers')}
+                      />
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <h5 className="text-xs text-gray-600">생활지원사</h5>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleOpenLargeMap(lifeSupportMapData, '생활지원사 배치 현황', 'employees-life-support')}
+                          className="text-xs"
+                        >
+                          <Maximize2 className="h-3 w-3 mr-1" />
+                          큰 지도
+                        </Button>
+                      </div>
+                      <GyeongsangnamMap
+                        data={lifeSupportMapData}
+                        colorScheme="purple"
+                        title="생활지원사 배치 현황"
+                        height="400px"
+                        showLabels={true}
+                        onDistrictClick={(district) => handleDistrictClick(district, 'employees-life-support')}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
       {/* Action Buttons */}
       <div className="flex gap-4">
         <Button onClick={() => window.location.reload()}>
@@ -921,6 +2460,20 @@ export default function Dashboard() {
           데이터 내보내기
         </Button>
       </div>
+
+      {/* 시군구 상세 정보 모달 */}
+      <Dialog open={isDistrictModalOpen} onOpenChange={setIsDistrictModalOpen}>
+        <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto z-[9999]" style={{ zIndex: 9999 }}>
+          {renderModalContent()}
+        </DialogContent>
+      </Dialog>
+
+      {/* 큰 지도 모달 */}
+      <Dialog open={isLargeMapModalOpen} onOpenChange={setIsLargeMapModalOpen}>
+        <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto z-[9999]" style={{ zIndex: 9999 }}>
+          {renderLargeMapContent()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

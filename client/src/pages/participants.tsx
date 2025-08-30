@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Filter, AlertTriangle, ChevronDown, ChevronUp, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Upload, List, Eye, Users, RefreshCw, Filter, AlertTriangle, ChevronDown, ChevronUp, BarChart3, Download } from 'lucide-react';
 import { Link } from 'wouter';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -591,6 +591,114 @@ export default function ParticipantsPage() {
   const [inconsistencyData, setInconsistencyData] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
+
+  // 📊 데이터 내보내기 함수
+  const exportInconsistencyData = useCallback(() => {
+    if (!inconsistencyData || inconsistencyData.length === 0) {
+      toast({
+        title: "내보낼 데이터 없음",
+        description: "불일치 분석 결과가 없습니다. 먼저 분석을 실행해주세요.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      // CSV 형태로 데이터 변환
+      const csvData = [];
+      
+      // 헤더 추가
+      csvData.push([
+        '기관명',
+        '기관코드',
+        '성명',
+        '생년월일',
+        '직종',
+        '불일치 유형',
+        '배움터 상태',
+        '모인우리 상태',
+        '배움터 퇴사일',
+        '모인우리 퇴사일',
+        '퇴사일 차이(일)',
+        '배움터 소속기관',
+        '모인우리 소속기관',
+        '우선순위',
+        '권장 조치사항',
+        '상세 설명'
+      ]);
+
+      // 데이터 행 추가
+      inconsistencyData.forEach(institution => {
+        institution.inconsistencies.forEach(person => {
+          const inconsistencyTypes = person.inconsistencyTypes || [];
+          const actions = getRecommendedActions(person);
+          const highPriorityAction = actions.find(a => a.priority === 'high') || actions[0];
+          
+          csvData.push([
+            institution.institutionName || '',
+            institution.institutionCode || '',
+            person.name || '',
+            person.birthDate || '',
+            person.jobType || '',
+            inconsistencyTypes.join(', '),
+            person.participantStatus || '',
+            person.employeeStatus || '',
+            person.participantResignDate || '',
+            person.employeeResignDate || '',
+            person.resignDateDiff || '',
+            person.participantInstitution || '',
+            person.employeeInstitution || '',
+            highPriorityAction?.priority || '',
+            highPriorityAction?.title || '',
+            highPriorityAction?.description || ''
+          ]);
+        });
+      });
+
+      // CSV 문자열 생성
+      const csvString = csvData.map(row => 
+        row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+      ).join('\n');
+
+      // BOM 추가 (한글 깨짐 방지)
+      const BOM = '\uFEFF';
+      const csvWithBOM = BOM + csvString;
+
+      // 파일 다운로드
+      const blob = new Blob([csvWithBOM], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      
+      // 파일명 생성 (현재 날짜 포함)
+      const now = new Date();
+      const dateString = now.getFullYear() + 
+        String(now.getMonth() + 1).padStart(2, '0') + 
+        String(now.getDate()).padStart(2, '0') + '_' +
+        String(now.getHours()).padStart(2, '0') + 
+        String(now.getMinutes()).padStart(2, '0');
+      
+      link.setAttribute('download', `데이터불일치분석_${dateString}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "내보내기 완료",
+        description: `불일치 분석 결과가 CSV 파일로 다운로드되었습니다. (${inconsistencyData.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건)`,
+      });
+
+    } catch (error) {
+      console.error('데이터 내보내기 오류:', error);
+      toast({
+        title: "내보내기 실패",
+        description: "데이터 내보내기 중 오류가 발생했습니다.",
+        variant: "destructive"
+      });
+    }
+  }, [inconsistencyData, toast, getRecommendedActions]);
   
   // Reset analysis cache when employee data changes
   useEffect(() => {
@@ -1478,7 +1586,7 @@ export default function ParticipantsPage() {
                           <strong>⚠️ 불일치 발견!</strong> 
                           <span className="text-red-600 ml-2">
                             {inconsistencyData.reduce((sum, inst) => sum + inst.inconsistencies.length, 0)}건의 
-                            데이터 불일치가 발견되었습니다.
+                            데이터 불일치가 발견되었습니다. 우측 "Excel 내보내기" 버튼으로 상세 분석 결과를 다운로드할 수 있습니다.
                           </span>
                         </div>
                       ) : (
@@ -1500,8 +1608,20 @@ export default function ParticipantsPage() {
                       <strong className="text-orange-600">중요:</strong> 불일치 발견 시 종사자 관리(모인우리) 데이터를 우선으로 처리됩니다.
                     </div>
                     
-                    {/* 항상 사용 가능한 재분석 버튼 */}
+                    {/* 분석 및 내보내기 버튼 */}
                     <div className="flex gap-2">
+                      {/* 데이터 내보내기 버튼 */}
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={exportInconsistencyData}
+                        disabled={!inconsistencyData || inconsistencyData.length === 0}
+                        className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                      >
+                        <Download className="h-4 w-4 mr-1" />
+                        Excel 내보내기
+                      </Button>
+                      
                       <Button 
                         variant="outline" 
                         size="sm"
@@ -1707,20 +1827,35 @@ export default function ParticipantsPage() {
                   {/* 📋 기관별 불일치 개요 테이블 */}
                   <Card id="inconsistency-overview" className="border-l-4 border-l-blue-500">
                     <CardHeader>
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Eye className="h-5 w-5 text-blue-600" />
-                        기관별 불일치 현황 개요
-                        <Badge variant="outline" className="ml-2">
-                          {inconsistencyData.length}개 기관
-                        </Badge>
-                      </CardTitle>
-                      <CardDescription>
-                        각 기관을 클릭하면 해당 기관의 상세 불일치 내역으로 이동합니다.
-                        <br />
-                        <span className="text-sm text-amber-600 font-medium">
-                          ⚠️ 총 불일치는 고유한 항목 수이며, 각 카테고리별 합계와 다를 수 있습니다 (한 항목이 여러 카테고리에 해당될 수 있음)
-                        </span>
-                      </CardDescription>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <Eye className="h-5 w-5 text-blue-600" />
+                            기관별 불일치 현황 개요
+                            <Badge variant="outline" className="ml-2">
+                              {inconsistencyData.length}개 기관
+                            </Badge>
+                          </CardTitle>
+                          <CardDescription className="mt-2">
+                            각 기관을 클릭하면 해당 기관의 상세 불일치 내역으로 이동합니다.
+                            <br />
+                            <span className="text-sm text-amber-600 font-medium">
+                              ⚠️ 총 불일치는 고유한 항목 수이며, 각 카테고리별 합계와 다를 수 있습니다 (한 항목이 여러 카테고리에 해당될 수 있음)
+                            </span>
+                          </CardDescription>
+                        </div>
+                        
+                        {/* 테이블용 내보내기 버튼 */}
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={exportInconsistencyData}
+                          className="bg-green-50 hover:bg-green-100 text-green-700 border-green-200 shrink-0"
+                        >
+                          <Download className="h-4 w-4 mr-1" />
+                          Excel 내보내기
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <div className="border border-gray-200 rounded-lg">

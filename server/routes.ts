@@ -10,6 +10,7 @@ import {
   calculateTimeSeriesStats
 } from "./education-statistics";
 import { getAllDistrictInfo, getDistrictByInstitution } from "./district-institutions";
+import { IntegratedAnalysisService } from "./integrated-analysis";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import * as cheerio from "cheerio";
@@ -2823,7 +2824,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // 통합 연동분석 API
   app.get("/api/integrated-analysis", async (req, res) => {
     try {
-      const { IntegratedAnalysisService } = await import('./integrated-analysis');
+      // IntegratedAnalysisService is now imported at the top
       const analysisData = await IntegratedAnalysisService.generateAnalysis();
       const summary = IntegratedAnalysisService.calculateSummaryStats(analysisData);
       

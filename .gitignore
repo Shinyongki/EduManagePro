@@ -6,3 +6,5 @@ vite.config.ts.*
 *.tar.gz
 dist-electron/
 dist-electron-working/
+# Electron build outputs
+dist-electron*/

@@ -41,6 +41,8 @@ export interface IntegratedAnalysisRow {
   // 종사자 직무교육 이수율
   education_f: number;
   education_rate_fb: number;
+  education_social_rate: number;
+  education_life_rate: number;
   education_warning?: number;
   education_g?: number;
 }
@@ -65,6 +67,17 @@ export class IntegratedAnalysisService {
         emp.institution === institution.name || 
         emp.institutionCode === institution.code
       );
+
+      // 효능원노인통합지원센터 디버깅
+      if (institution.name.includes('효능원')) {
+        console.log('효능원노인통합지원센터 데이터:');
+        console.log('- 기관명:', institution.name);
+        console.log('- 수기 전담:', institution.allocatedSocialWorkers);
+        console.log('- 수기 생활:', institution.allocatedLifeSupport);
+        console.log('- 예산 전담:', institution.allocatedSocialWorkersGov);
+        console.log('- 예산 생활:', institution.allocatedLifeSupportGov);
+        console.log('- 전체 기관 객체:', institution);
+      }
       
       // 재직자만 필터링
       const activeEmployees = institutionEmployees.filter(emp => emp.isActive);
@@ -79,12 +92,34 @@ export class IntegratedAnalysisService {
         p.institutionCode === institution.code
       );
 
-      // 교육 이수자 계산
+      // 교육 이수자 계산 (전체)
       const basicCompleted = institutionParticipants.filter(p => 
         p.basicTraining === '완료' || p.basicTraining === '수료'
       ).length;
       
       const advancedCompleted = institutionParticipants.filter(p => 
+        p.advancedEducation === '완료' || p.advancedEducation === '수료'
+      ).length;
+
+      // 전담사회복지사 교육 이수자 계산
+      const socialWorkerParticipants = institutionParticipants.filter(p => 
+        p.jobType === '전담사회복지사' || p.jobType === '선임전담사회복지사'
+      );
+      const socialBasicCompleted = socialWorkerParticipants.filter(p => 
+        p.basicTraining === '완료' || p.basicTraining === '수료'
+      ).length;
+      const socialAdvancedCompleted = socialWorkerParticipants.filter(p => 
+        p.advancedEducation === '완료' || p.advancedEducation === '수료'
+      ).length;
+
+      // 생활지원사 교육 이수자 계산
+      const lifeSupportParticipants = institutionParticipants.filter(p => 
+        p.jobType === '생활지원사'
+      );
+      const lifeBasicCompleted = lifeSupportParticipants.filter(p => 
+        p.basicTraining === '완료' || p.basicTraining === '수료'
+      ).length;
+      const lifeAdvancedCompleted = lifeSupportParticipants.filter(p => 
         p.advancedEducation === '완료' || p.advancedEducation === '수료'
       ).length;
 
@@ -122,6 +157,16 @@ export class IntegratedAnalysisService {
       const educationRate = activeEmployees.length > 0
         ? ((basicCompleted + advancedCompleted) / (activeEmployees.length * 2)) * 100
         : 0;
+      
+      // 전담사회복지사 교육 이수율 (I/D 기준)
+      const socialEducationRate = socialWorkers.length > 0
+        ? Math.round(((socialBasicCompleted + socialAdvancedCompleted) / socialWorkers.length) * 100 * 100) / 100 // 소수점 2자리까지
+        : 0;
+      
+      // 생활지원사 교육 이수율 (I/D 기준)
+      const lifeEducationRate = lifeSupport.length > 0
+        ? Math.round(((lifeBasicCompleted + lifeAdvancedCompleted) / lifeSupport.length) * 100 * 100) / 100 // 소수점 2자리까지
+        : 0;
 
       const row: IntegratedAnalysisRow = {
         id: `analysis_${institution.code}`,
@@ -136,10 +181,10 @@ export class IntegratedAnalysisService {
         backup1_social: institution.allocatedSocialWorkers || 0,
         backup1_life: institution.allocatedLifeSupport || 0,
         
-        // 예산내시 기준 (동일하게 설정)
-        backup2_a: (institution.allocatedSocialWorkers || 0) + (institution.allocatedLifeSupport || 0),
-        backup2_b: institution.allocatedSocialWorkers || 0,
-        backup2_c: institution.allocatedLifeSupport || 0,
+        // 예산내시 기준 (정부 배정 기준)
+        backup2_a: (institution.allocatedSocialWorkersGov || 0) + (institution.allocatedLifeSupportGov || 0),
+        backup2_b: institution.allocatedSocialWorkersGov || 0,
+        backup2_c: institution.allocatedLifeSupportGov || 0,
         
         // 실제 채용인원
         dLevel_all: activeEmployees.length,
@@ -163,6 +208,8 @@ export class IntegratedAnalysisService {
         // 교육 이수율
         education_f: basicCompleted + advancedCompleted,
         education_rate_fb: educationRate,
+        education_social_rate: socialEducationRate,
+        education_life_rate: lifeEducationRate,
         education_warning: educationRate < 70 ? 1 : 0,
         education_g: basicCompleted
       };

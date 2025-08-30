@@ -14,9 +14,13 @@
     "electron": "electron electron/main.js",
     "electron-dev": "cross-env NODE_ENV=development electron electron/main.js",
     "build-electron": "npm run build && electron-builder",
+    "build-electron-win": "npm run build && electron-builder --win",
+    "build-electron-portable": "npm run build && electron-builder --win portable",
+    "build-electron-installer": "npm run build && electron-builder --win nsis",
     "dist": "npm run build && electron-builder --dir",
     "pack": "electron-builder --dir",
-    "release": "npm run build && electron-builder"
+    "release": "npm run build && electron-builder --publish=never",
+    "release-all": "npm run build && electron-builder --win --mac --linux"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.16.0",
@@ -139,25 +143,64 @@
   "main": "electron/main.js",
   "homepage": "./",
   "build": {
-    "appId": "com.edumangepro.app",
-    "productName": "EduManagePro",
+    "appId": "com.edumanagepro.app",
+    "productName": "교육관리 시스템 (EduManagePro)",
+    "copyright": "Copyright © 2025 EduManagePro Team",
     "directories": {
-      "output": "dist-electron-working"
+      "output": "dist-electron-final"
     },
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "data/**/*",
+      "!node_modules/**/*",
+      "!client/**/*",
+      "!server/**/*",
+      "!scripts/**/*",
+      "!*.md",
+      "!*.js",
+      "!*.ts",
+      "!*.json",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "data",
+        "to": "data",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
-      "target": "dir",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
       "verifyUpdateCodeSignature": false,
       "forceCodeSigning": false
     },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "교육관리 시스템"
+    },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "category": "public.app-category.productivity"
     },
     "linux": {
-      "target": "AppImage"
-    }
+      "target": "AppImage",
+      "category": "Office"
+    },
+    "compression": "maximum",
+    "removePackageScripts": true
   }
 }

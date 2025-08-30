@@ -3,26 +3,17 @@ import path from 'path';
 import type { EducationData, EmployeeData, InstitutionData, AnalysisResult, EducationParticipant, EducationEnrollment, IntegratedAnalysisData } from "@shared/schema";
 import type { IStorage, SessionData, InstitutionStats, SystemStats } from './storage';
 
-// Electron app detection
-function getElectronApp() {
-  try {
-    // Use require for CommonJS compatibility in packaged app
-    const { app } = eval('require')('electron');
-    return app;
-  } catch (error) {
-    // Electron is not available in this environment
-    return null;
-  }
-}
+// File storage implementation for education management system
+// Uses standard data directory to avoid Electron-specific complications
 
 export class FileStorage implements IStorage {
   private dataDir: string;
   private fileLocks: Map<string, Promise<void>> = new Map();
 
   constructor() {
-    // Get user data directory
-    const electronApp = getElectronApp();
-    this.dataDir = electronApp ? electronApp.getPath('userData') : path.join(process.cwd(), 'data');
+    // Always use the data directory in project root
+    // This avoids any Electron-specific path detection
+    this.dataDir = path.join(process.cwd(), 'data');
     this.ensureDataDir();
   }
 
