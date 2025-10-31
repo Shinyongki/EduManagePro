@@ -15,6 +15,7 @@ import EducationStatsPage from "@/pages/education-stats";
 import InstitutionStatsPage from "@/pages/institution-stats";
 import EmployeeStatsPage from "@/pages/employee-stats-basic";
 import TestRoute from "@/pages/test-route";
+import MonitoringDashboard from "@/pages/monitoring-dashboard";
 
 function Router() {
   return (
@@ -30,6 +31,7 @@ function Router() {
         <Route path="/education-stats" component={EducationStatsPage} />
         <Route path="/institution-stats" component={InstitutionStatsPage} />
         <Route path="/employee-stats" component={EmployeeStatsPage} />
+        <Route path="/monitoring-dashboard" component={MonitoringDashboard} />
         <Route>
           <div className="min-h-screen flex items-center justify-center">
             <div className="text-center">

@@ -28,6 +28,7 @@ import {
 import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
 import EmployeeStatistics from "@/components/employees/employee-statistics";
+import { GWANGYEOK_MANAGERS, getGwangyeokManager } from "@/constants/managers";
 
 export default function EmployeeDataPage() {
   const [showUploadSection, setShowUploadSection] = useState(false);
@@ -39,6 +40,7 @@ export default function EmployeeDataPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'active', 'inactive'
   const [jobTypeFilter, setJobTypeFilter] = useState('all'); // 'all', 'social-worker', 'life-support'
+  const [managerFilter, setManagerFilter] = useState('all'); // 'all', '이정혜', '이연숙', '김수연', '신용기'
   const [isExporting, setIsExporting] = useState(false);
   const [isCorrectingData, setIsCorrectingData] = useState(false);
   const { toast } = useToast();
@@ -1377,7 +1379,13 @@ export default function EmployeeDataPage() {
       
       if (!isSpecialized) return false;
     }
-    
+
+    // 광역담당자 필터링
+    if (managerFilter !== 'all') {
+      const gwangyeokManager = getGwangyeokManager(item.institutionCode || '');
+      if (gwangyeokManager !== managerFilter) return false;
+    }
+
     // 검색어 필터링
     if (!searchTerm) return true;
     const searchLower = searchTerm.toLowerCase();
@@ -2004,6 +2012,20 @@ export default function EmployeeDataPage() {
                               <SelectItem value="specialized">특화 담당자</SelectItem>
                             </SelectContent>
                           </Select>
+                          <Select value={managerFilter} onValueChange={(value) => {
+                            setManagerFilter(value);
+                            setCurrentPage(1);
+                          }}>
+                            <SelectTrigger className="w-full sm:w-32">
+                              <SelectValue placeholder="담당자" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">전체</SelectItem>
+                              {GWANGYEOK_MANAGERS.map(manager => (
+                                <SelectItem key={manager} value={manager}>{manager}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <Select value={itemsPerPage.toString()} onValueChange={(value) => {
                             setItemsPerPage(Number(value));
                             setCurrentPage(1);
@@ -2083,6 +2105,7 @@ export default function EmployeeDataPage() {
                               <TableHead className="w-32 text-center bg-background border-b border-r">광역코드</TableHead>
                               <TableHead className="w-48 bg-background border-b border-r">광역명</TableHead>
                               <TableHead className="w-32 text-center bg-background border-b border-r">수행기관코드</TableHead>
+                              <TableHead className="w-24 text-center bg-background border-b border-r">광역담당자</TableHead>
                               <TableHead className="w-32 text-center bg-background border-b border-r">직무구분</TableHead>
                               <TableHead className="w-32 bg-background border-b border-r">담당업무</TableHead>
                               <TableHead className="w-24 bg-background border-b border-r">성명</TableHead>
@@ -2106,6 +2129,9 @@ export default function EmployeeDataPage() {
                                 <TableCell className="text-center border-r font-mono">{employee.regionCode || '-'}</TableCell>
                                 <TableCell className="border-r">{employee.regionName || employee.institution || '-'}</TableCell>
                                 <TableCell className="text-center border-r font-mono">{employee.institutionCode || '-'}</TableCell>
+                                <TableCell className="text-center border-r">
+                                  <span className="text-sm font-medium">{getGwangyeokManager(employee.institutionCode || '') || '-'}</span>
+                                </TableCell>
                                 <TableCell className="text-center border-r">
                                   <Badge variant="outline">{employee.jobType || '-'}</Badge>
                                 </TableCell>

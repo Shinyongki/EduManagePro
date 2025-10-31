@@ -1,18 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  FileUp, 
-  Users, 
-  BookOpen, 
-  Award, 
-  UserCheck, 
-  Building, 
+import {
+  FileUp,
+  Users,
+  BookOpen,
+  Award,
+  UserCheck,
+  Building,
   BarChart3,
   PieChart,
   Home,
   ChevronRight,
   GraduationCap,
-  BriefcaseBusiness
+  BriefcaseBusiness,
+  ClipboardCheck
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
@@ -64,7 +65,7 @@ export default function Sidebar({ className }: SidebarProps) {
       items: [
         {
           title: "기본 교육",
-          href: "/basic-education", 
+          href: "/basic-education",
           icon: BookOpen,
           description: "기본교육 데이터 관리",
           isActive: location === "/basic-education"
@@ -73,7 +74,7 @@ export default function Sidebar({ className }: SidebarProps) {
           title: "심화 교육",
           href: "/advanced-education",
           icon: Award,
-          description: "심화교육 데이터 관리", 
+          description: "심화교육 데이터 관리",
           isActive: location === "/advanced-education"
         },
         {
@@ -82,6 +83,22 @@ export default function Sidebar({ className }: SidebarProps) {
           icon: Users,
           description: "소속 회원 교육 이수 현황 및 통계",
           isActive: location === "/participants"
+        }
+      ]
+    },
+    {
+      title: "평가 관리",
+      icon: ClipboardCheck,
+      color: "text-blue-600",
+      bgColor: "bg-blue-50",
+      borderColor: "border-blue-200",
+      items: [
+        {
+          title: "모니터링 현황",
+          href: "/monitoring-dashboard",
+          icon: BarChart3,
+          description: "상시관리·점검 진행 상태",
+          isActive: location === "/monitoring-dashboard"
         }
       ]
     }
