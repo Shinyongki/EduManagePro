@@ -1,5 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Phone, Mail } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Search, Phone, Mail, Upload, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import {
   GWANGYEOK_MANAGER_MAPPING,
   SIGUNGU_MANAGER_INFO,
@@ -8,9 +10,20 @@ import {
   getGwangyeokManager,
   getSigunguManager
 } from '@/constants/managers';
+import {
+  loadMonitoringData,
+  saveMonitoringData,
+  calculateStats
+} from '@/lib/monitoring-storage';
+import type { MonitoringDataset } from '@/types/monitoring';
 
 const MonitoringDashboard = () => {
-  const baseData = {
+  const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(true);
+  const [monitoringData, setMonitoringData] = useState<Record<string, MonitoringDataset | null>>({});
+
+  // 초기 하드코딩 데이터 (fallback 용도)
+  const defaultBaseData = {
     '24년 시군구': [
       {id:"A48310001",name:"거제노인통합지원센터",city:"거제시",status:"미입력"},
       {id:"A48310002",name:"거제사랑노인복지센터",city:"거제시",status:"입력완료"},
