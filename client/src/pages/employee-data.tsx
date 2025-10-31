@@ -28,7 +28,9 @@ import {
 import { DateUploadForm } from "@/components/snapshot/date-upload-form";
 import { snapshotManager } from "@/lib/snapshot-manager";
 import EmployeeStatistics from "@/components/employees/employee-statistics";
-import { GWANGYEOK_MANAGERS, getGwangyeokManager } from "@/constants/managers";
+import { GWANGYEOK_MANAGERS, getGwangyeokManager, GWANGYEOK_MANAGER_MAPPING } from "@/constants/managers";
+import ManagerSelector from "@/components/manager/manager-selector";
+import { loadSelectedManager } from "@/lib/manager-storage";
 
 export default function EmployeeDataPage() {
   const [showUploadSection, setShowUploadSection] = useState(false);
@@ -41,42 +43,63 @@ export default function EmployeeDataPage() {
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'active', 'inactive'
   const [jobTypeFilter, setJobTypeFilter] = useState('all'); // 'all', 'social-worker', 'life-support'
   const [managerFilter, setManagerFilter] = useState('all'); // 'all', '이정혜', '이연숙', '김수연', '신용기'
+  const [selectedManagerForLoading, setSelectedManagerForLoading] = useState<string>(''); // 데이터 로딩용 담당자
   const [isExporting, setIsExporting] = useState(false);
   const [isCorrectingData, setIsCorrectingData] = useState(false);
   const { toast } = useToast();
   const { employeeData, setEmployeeData, loadEmployeeData, loadInstitutionData } = useEmployeeStore();
 
+  // 담당자 선택 후 데이터 로딩
   useEffect(() => {
+    if (!selectedManagerForLoading) {
+      // 담당자가 아직 선택되지 않음 - 데이터 로딩 안함
+      return;
+    }
+
+    console.log(`🔄 ${selectedManagerForLoading} 담당자 데이터 로딩 시작...`);
+
     const loadInitialData = async () => {
-      console.log('🔄 초기 데이터 로딩 시작...');
-      
-      // 먼저 store의 자동 로딩 시도 (기관 데이터와 직원 데이터 모두)
+      // 담당자가 선택되면 해당 담당자 데이터만 로딩
       try {
         await Promise.all([
-          loadEmployeeData(),
+          fetchEmployeeData(false),
           loadInstitutionData()
         ]);
-        console.log('✅ Store 자동 로딩 완료 (직원 + 기관 데이터)');
-        
-        // 잠시 후 데이터 확인 (store 상태 업데이트 대기)
-        setTimeout(() => {
-          const currentData = useEmployeeStore.getState().employeeData;
-          if (!currentData || currentData.length === 0) {
-            console.log('⚠️ Store에 데이터 없음, 페이지 레벨 로딩 시도...');
-            fetchEmployeeData();
-          } else {
-            console.log(`✅ Store에서 ${currentData.length}명 데이터 로드 완료`);
-          }
-        }, 100);
-        
+        console.log(`✅ ${selectedManagerForLoading} 담당자 데이터 로딩 완료`);
       } catch (error) {
-        console.error('❌ Store 로딩 실패, 페이지 레벨 로딩 시도:', error);
-        fetchEmployeeData();
+        console.error('❌ 데이터 로딩 실패:', error);
+        toast({
+          title: "데이터 로딩 실패",
+          description: "데이터를 불러오는 중 오류가 발생했습니다.",
+          variant: "destructive",
+        });
       }
     };
-    
+
     loadInitialData();
-  }, []);
+  }, [selectedManagerForLoading]);
+
+  // 담당자 필터링 헬퍼 함수
+  const filterByManager = (data: any[]) => {
+    if (!selectedManagerForLoading || selectedManagerForLoading === 'all') {
+      return data;
+    }
+
+    // 선택된 담당자의 기관코드 목록
+    const managerInstitutions = Object.entries(GWANGYEOK_MANAGER_MAPPING)
+      .filter(([_, manager]) => manager === selectedManagerForLoading)
+      .map(([code, _]) => code);
+
+    console.log(`🔍 ${selectedManagerForLoading} 담당자 기관 코드:`, managerInstitutions);
+
+    // 담당자의 기관 종사자만 필터링
+    const filtered = data.filter(emp =>
+      managerInstitutions.includes(emp.institutionCode || '')
+    );
+
+    console.log(`📊 전체 ${data.length}명 → ${selectedManagerForLoading} 담당 ${filtered.length}명`);
+    return filtered;
+  };
 
   const fetchEmployeeData = async (forceRefresh = false) => {
     setIsLoading(true);
@@ -600,9 +623,11 @@ export default function EmployeeDataPage() {
           
           return emp;
         });
-        
-        setEmployeeData(correctedData);
-        
+
+        // 담당자 필터링 적용
+        const filteredData = filterByManager(correctedData);
+        setEmployeeData(filteredData);
+
         // 보정된 데이터를 IndexedDB에 다시 저장
         try {
           await educationDB.setItem('employeeData', correctedData);
@@ -634,9 +659,11 @@ export default function EmployeeDataPage() {
           // 다양한 가능성을 고려해서 데이터 추출
           const actualData = result.data || result || [];
           console.log('🎯 사용할 데이터:', actualData.length, '명');
-          
-          setEmployeeData(actualData);
-          
+
+          // 담당자 필터링 적용
+          const filteredData = filterByManager(actualData);
+          setEmployeeData(filteredData);
+
           // IndexedDB에도 저장 (다음 로드를 위해)
           await educationDB.setItem('employeeData', actualData);
           console.log('✅ 서버 데이터를 IndexedDB에 저장 완료');
@@ -1508,6 +1535,16 @@ export default function EmployeeDataPage() {
           </p>
         </div>
       </div>
+
+      {/* 담당자 선택 */}
+      <ManagerSelector
+        onManagerSelect={(manager) => {
+          console.log(`✅ 담당자 선택됨: ${manager}`);
+          setSelectedManagerForLoading(manager);
+          setManagerFilter(manager); // 필터도 같이 업데이트
+        }}
+        showAllOption={true}
+      />
 
       {/* 데이터 업로드 섹션 - 접을 수 있는 카드 */}
       <Collapsible open={showUploadSection} onOpenChange={setShowUploadSection}>
